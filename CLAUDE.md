@@ -53,6 +53,7 @@ agent/
   tools.py     snapshot_page, compare_snapshots, write_test, run_tests
   memory.py    short-term (disk snapshots) + long-term (memory/memory.json)
   main.py      CLI entry point (--mock, --release ...)
+  diff_releases.py  no-LLM helper: snapshot good + buggy and print the diff
 tests/generated/        tests written by the agent (test_*.py only)
 memory/memory.json      long-term memory
 runs/<timestamp>/       trace.jsonl, snapshots/, report.md   (gitignored)
@@ -104,8 +105,13 @@ files carry no "BUG" comments, so they look like a real release.
 
 ## Tools (exposed to the model)
 
-- `snapshot_page(url, label)`: returns a short summary; saves full aria JSON (body + every frame) to disk.
-- `compare_snapshots(baseline, new)`: returns readable changes, grouped per frame.
+- `snapshot_page(url, label)`: signs in as the first test user and snapshots the `sign-in` and
+  `dashboard` pages (body + every iframe, keyed by iframe id). Waits for networkidle, then until two
+  aria snapshots in a row match. Navigates by stable ids + Enter (not role/name) so a11y bugs can't
+  block capture. Saves full JSON to disk; returns per-frame summary (node count, headings, buttons),
+  JS errors, and any error (HTTP 404, connection refused, timeout) instead of raising.
+- `compare_snapshots(baseline, new)`: labels or .json paths. Returns REMOVED / ADDED / CHANGED lines
+  per `page / frame` (max 20 each), flags controls with no accessible name, new JS errors.
 - `write_test(filename, code)`: only `test_*.py`, only inside `tests/generated/`.
 - `run_tests()`: runs pytest with a timeout; returns short results.
 
@@ -132,7 +138,7 @@ In mock mode, write one test with a wrong selector first so healing is visible.
 1. Setup: CLAUDE.md, folder structure, requirements.txt, .env.example, .gitignore. ✅
 2. Portal (good). ✅
 3. Portal (buggy, 4 planted bugs). ✅
-4. Tools (snapshot / compare / write_test / run_tests).
+4. Tools: snapshot_page + compare_snapshots + diff script. ✅ (write_test / run_tests next)
 5. Memory.
 6. Harness + mock LLM + main.py.
 7. Evals.
