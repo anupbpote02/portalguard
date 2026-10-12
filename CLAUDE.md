@@ -80,9 +80,12 @@ Served with: `python -m http.server 8000 --directory portal`
   `<iframe id="lab-results-frame" title="Lab results">` loading `lab-results.html`. No session ->
   redirect to sign-in.
 - `lab-results.html`: "Lab results" heading, table of the user's 3 results, "Download PDF" button
-  that shows "Download started" in a `role="status"` region. iframe is tall enough to show all of
-  it without scrolling.
+  that downloads a small client-generated PDF `lab-results-<MRN>.pdf` (marked DEMO DATA /
+  NOT A REAL PATIENT) **and** shows "Download started" in a `role="status"` region. iframe is tall
+  enough to show all of it without scrolling.
 - Content is rendered by JS after a fetch, so snapshots/tests must sign in first and wait for content.
+- Download tests must use Playwright `page.expect_download()` and check `suggested_filename`;
+  the status text alone is not proof of a download.
 
 ### Planted bugs (buggy release only)
 
