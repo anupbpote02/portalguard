@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lab results - Harbor General Patient Portal</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="frame-body">
+  <main class="card">
+    <h1>Lab results</h1>
+
+    <table>
+      <thead>
+        <tr><th>Test</th><th>Result</th><th>Reference range</th><th>Date</th></tr>
+      </thead>
+      <tbody id="lab-rows"></tbody>
+    </table>
+
+    <button id="download-pdf" type="button">Download PDF</button>
+    <p id="download-status" class="status" role="status"></p>
+  </main>
+
+  <script>
+    // Loaded inside the dashboard iframe; same origin, so it shares the demo session.
+    (async function () {
+      const email = sessionStorage.getItem("portalUser");
+      const data = await fetch("../test-users.json").then(function (r) { return r.json(); });
+      const user = data.users.find(function (u) { return u.email === email; });
+      if (!user) return;
+
+      const rows = document.getElementById("lab-rows");
+      user.labResults.forEach(function (lab) {
+        const row = document.createElement("tr");
+        [lab.test, lab.result, lab.range, lab.date].forEach(function (value) {
+          const cell = document.createElement("td");
+          cell.textContent = value;
+          row.appendChild(cell);
+        });
+        rows.appendChild(row);
+      });
+    })();
+
+    // No real file: showing the status message is the "download" for this demo.
+    document.getElementById("download-pdf").addEventListener("click", function () {
+      document.getElementById("download-status").textContent = "Download started";
+    });
+  </script>
+</body>
+</html>

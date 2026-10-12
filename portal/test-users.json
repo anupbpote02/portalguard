@@ -1,0 +1,50 @@
+{
+  "_note": "SYNTHETIC demo data only. Not real patients, not real credentials. Single source of truth for the portal (both releases) and for tests.",
+  "users": [
+    {
+      "email": "jordan.rivera@test.example",
+      "password": "Test123!",
+      "name": "Jordan Rivera",
+      "mrn": "TEST-000123",
+      "appointments": [
+        "Nov 3, 2026, 9:30 AM: Primary care with Dr. Avery Chen",
+        "Nov 17, 2026, 2:00 PM: Cardiology follow-up with Dr. Sam Patel"
+      ],
+      "labResults": [
+        { "test": "Hemoglobin A1c", "result": "5.4 %", "range": "4.0 - 5.6 %", "date": "Oct 1, 2026" },
+        { "test": "LDL cholesterol", "result": "98 mg/dL", "range": "< 100 mg/dL", "date": "Oct 1, 2026" },
+        { "test": "TSH", "result": "2.1 mIU/L", "range": "0.4 - 4.0 mIU/L", "date": "Oct 1, 2026" }
+      ]
+    },
+    {
+      "email": "casey.morgan@test.example",
+      "password": "Test456!",
+      "name": "Casey Morgan",
+      "mrn": "TEST-000456",
+      "appointments": [
+        "Nov 5, 2026, 11:00 AM: Dermatology with Dr. Lee Okafor",
+        "Dec 2, 2026, 8:15 AM: Annual physical with Dr. Avery Chen"
+      ],
+      "labResults": [
+        { "test": "Vitamin D", "result": "32 ng/mL", "range": "30 - 100 ng/mL", "date": "Sep 24, 2026" },
+        { "test": "Ferritin", "result": "45 ng/mL", "range": "15 - 150 ng/mL", "date": "Sep 24, 2026" },
+        { "test": "Glucose (fasting)", "result": "88 mg/dL", "range": "70 - 99 mg/dL", "date": "Sep 24, 2026" }
+      ]
+    },
+    {
+      "email": "riley.nguyen@test.example",
+      "password": "Test789!",
+      "name": "Riley Nguyen",
+      "mrn": "TEST-000789",
+      "appointments": [
+        "Nov 10, 2026, 3:45 PM: Physical therapy with Dr. Morgan Diaz",
+        "Nov 24, 2026, 10:00 AM: Endocrinology with Dr. Sam Patel"
+      ],
+      "labResults": [
+        { "test": "Creatinine", "result": "0.9 mg/dL", "range": "0.6 - 1.2 mg/dL", "date": "Oct 6, 2026" },
+        { "test": "Potassium", "result": "4.2 mmol/L", "range": "3.5 - 5.1 mmol/L", "date": "Oct 6, 2026" },
+        { "test": "White blood cells", "result": "6.8 K/uL", "range": "4.0 - 11.0 K/uL", "date": "Oct 6, 2026" }
+      ]
+    }
+  ]
+}

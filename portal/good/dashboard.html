@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dashboard - Harbor General Patient Portal</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header>
+    <p>Harbor General Patient Portal</p>
+  </header>
+
+  <main>
+    <section class="card">
+      <h1 id="welcome">Welcome</h1>
+      <p class="muted" id="mrn"></p>
+    </section>
+
+    <section class="card">
+      <h2>Upcoming appointments</h2>
+      <ul id="appointments"></ul>
+    </section>
+
+    <iframe id="lab-results-frame" title="Lab results" src="lab-results.html"></iframe>
+  </main>
+
+  <script>
+    // Demo session: the signed-in test user's email is kept in sessionStorage.
+    (async function () {
+      const email = sessionStorage.getItem("portalUser");
+      const data = await fetch("../test-users.json").then(function (r) { return r.json(); });
+      const user = data.users.find(function (u) { return u.email === email; });
+      if (!user) {
+        window.location.href = "index.html";
+        return;
+      }
+
+      document.getElementById("welcome").textContent = "Welcome, " + user.name;
+      document.getElementById("mrn").textContent = "MRN: " + user.mrn;
+      const list = document.getElementById("appointments");
+      user.appointments.forEach(function (text) {
+        const item = document.createElement("li");
+        item.textContent = text;
+        list.appendChild(item);
+      });
+    })();
+  </script>
+</body>
+</html>

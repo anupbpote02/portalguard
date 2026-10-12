@@ -70,11 +70,19 @@ Served with: `python -m http.server 8000 --directory portal`
 
 "Harbor General Patient Portal":
 
-- `index.html`: labeled email + password fields, "Sign in" button; any input redirects to dashboard.
-- `dashboard.html`: patient name, "Upcoming appointments" heading + 2 appointments,
-  `<iframe id="lab-results-frame" title="Lab results">` loading `lab-results.html`.
-- `lab-results.html`: "Lab results" heading, table of 3 results, "Download PDF" button that shows
-  "Download started" when clicked.
+- `portal/test-users.json`: single source of truth for 3 synthetic test users (Jordan Rivera
+  `TEST-000123`, Casey Morgan `TEST-000456`, Riley Nguyen `TEST-000789`), each with email,
+  password, name, MRN, 2 appointments and 3 lab results. Used by both releases and by tests.
+- `index.html`: labeled email + password fields, "Sign in" button. Client-side demo login (not real
+  auth): valid test user -> dashboard (email kept in sessionStorage); wrong credentials -> error in
+  `role="alert"`, stays on sign-in.
+- `dashboard.html`: "Welcome, <name>", MRN, "Upcoming appointments" heading + 2 appointments,
+  `<iframe id="lab-results-frame" title="Lab results">` loading `lab-results.html`. No session ->
+  redirect to sign-in.
+- `lab-results.html`: "Lab results" heading, table of the user's 3 results, "Download PDF" button
+  that shows "Download started" in a `role="status"` region. iframe is tall enough to show all of
+  it without scrolling.
+- Content is rendered by JS after a fetch, so snapshots/tests must sign in first and wait for content.
 
 ### Planted bugs (buggy release only)
 

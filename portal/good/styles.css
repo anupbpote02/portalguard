@@ -1,0 +1,71 @@
+/* Shared styles for Harbor General Patient Portal (synthetic demo). */
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color: #1f2933;
+  background: #f4f7fa;
+}
+
+header {
+  background: #0b4f6c;
+  color: #fff;
+  padding: 16px 24px;
+}
+
+header p { margin: 0; font-size: 1.25rem; font-weight: 600; }
+
+main { max-width: 760px; margin: 24px auto; padding: 0 16px; }
+
+.card {
+  background: #fff;
+  border: 1px solid #d9e2ec;
+  border-radius: 8px;
+  padding: 20px 24px;
+  margin-bottom: 20px;
+}
+
+label { display: block; margin: 12px 0 4px; font-weight: 600; }
+
+input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #9aa5b1;
+  border-radius: 4px;
+  font-size: 1rem;
+}
+
+button {
+  margin-top: 16px;
+  padding: 8px 18px;
+  font-size: 1rem;
+  color: #fff;
+  background: #0b4f6c;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+button:focus-visible, input:focus-visible { outline: 3px solid #f0b429; outline-offset: 2px; }
+
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 8px; border-bottom: 1px solid #d9e2ec; }
+
+/* Tall enough to show the table, button and status message without scrolling. */
+iframe { width: 100%; height: 440px; border: 1px solid #d9e2ec; border-radius: 8px; background: #fff; }
+
+@media (max-width: 600px) {
+  iframe { height: 560px; }
+}
+
+/* Inside the iframe: the frame border already acts as the card edge. */
+.frame-body { background: #fff; }
+.frame-body main.card { margin: 0; border: 0; }
+
+.muted { color: #52606d; }
+
+.error { color: #b42318; font-weight: 600; min-height: 1.5em; margin: 12px 0 0; }
+
+/* Reserve space so "Download started" doesn't change the layout height. */
+.status { min-height: 1.5em; margin: 12px 0 0; font-weight: 600; color: #0b6e4f; }

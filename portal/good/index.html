@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in - Harbor General Patient Portal</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header>
+    <p>Harbor General Patient Portal</p>
+  </header>
+
+  <main>
+    <section class="card">
+      <h1>Sign in</h1>
+      <p class="muted">Demo only. Use a synthetic test user from portal/test-users.json.</p>
+
+      <form id="sign-in-form">
+        <label for="email">Email</label>
+        <input id="email" name="email" type="email" autocomplete="username">
+
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" autocomplete="current-password">
+
+        <p id="sign-in-error" class="error" role="alert"></p>
+
+        <button type="submit">Sign in</button>
+      </form>
+    </section>
+  </main>
+
+  <script>
+    // DEMO LOGIN, NOT REAL AUTH. Credentials are synthetic and checked in the browser.
+    // A real portal would authenticate server-side (e.g. Entra ID / SSO) and never ship passwords.
+    document.getElementById("sign-in-form").addEventListener("submit", async function (event) {
+      event.preventDefault();
+      const email = document.getElementById("email").value.trim().toLowerCase();
+      const password = document.getElementById("password").value;
+
+      const data = await fetch("../test-users.json").then(function (r) { return r.json(); });
+      const user = data.users.find(function (u) { return u.email === email && u.password === password; });
+
+      if (!user) {
+        document.getElementById("sign-in-error").textContent = "Incorrect email or password. Please try again.";
+        return;
+      }
+      sessionStorage.setItem("portalUser", user.email);
+      window.location.href = "dashboard.html";
+    });
+  </script>
+</body>
+</html>
