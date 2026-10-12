@@ -49,7 +49,8 @@ portal/
   good/     index.html (sign-in), dashboard.html, lab-results.html (loaded in iframe)
   buggy/    same pages, with 4 planted bugs
 agent/
-  harness.py   loop, budgets, allowlist, arg validation, trace log, mock LLM
+  harness.py   loop, budgets, allowlist, arg validation, trace log, tool schemas, system prompt
+  llm.py       OpenAILLM (gpt-4.1-mini) + MockLLM and mock scenarios (qe, guardrails, runaway)
   tools.py     snapshot_page, compare_snapshots, write_test, run_tests
   memory.py    short-term (disk snapshots) + long-term (memory/memory.json)
   main.py      CLI entry point (--mock, --release ...)
@@ -59,7 +60,7 @@ tests/generated/        tests written by the agent (test_*.py only, gitignored)
 tests/generated/conftest.py  human-written: patient fixture, localhost-only route guard, 5s timeouts
 pytest.ini              pythonpath=., default base_url = good release
 memory/memory.json      long-term memory
-runs/<timestamp>/       trace.jsonl, snapshots/, report.md   (gitignored)
+runs/<timestamp>/       trace.jsonl, snapshots/, test-results/, tests/ (copy), report.md   (gitignored)
 evals/expected_bugs.json
 evals/run_eval.py
 .github/workflows/qe.yml
@@ -106,6 +107,23 @@ Served with: `python -m http.server 8000 --directory portal`
 `diff -r portal/good portal/buggy` shows exactly these 4 changes and nothing else. The buggy
 files carry no "BUG" comments, so they look like a real release.
 
+## Harness (agent/harness.py, run with `python -m agent.main --mock [--scenario qe|guardrails|runaway]`)
+
+- Budgets checked BEFORE every LLM call: MAX_STEPS=25 (LLM calls), MAX_TOKENS=150000 (prompt +
+  completion summed), MAX_COST_USD=0.25, MAX_BLOCKED_CALLS=3 (policy_violation). One call can
+  overshoot by its own size; `max_completion_tokens=4000` bounds that.
+- Every tool call: known tool -> JSON args -> schema (no unknown/missing args, strings, maxLength,
+  pattern) -> localhost allowlist on `url`. Rejections go back to the model as `{"error": ...}`;
+  the run continues (except 3 blocked URLs). Tool exceptions never crash the run.
+- Harness binds what the model must not control: snapshot/results folders, and run_tests' base_url
+  (= release under test). Tool results over 6000 chars are truncated.
+- Trace events (JSONL, flushed per line): run_start, llm_call (tokens, cost, totals), tool_call
+  (args, status ok/invalid/blocked/error, result, duration_ms), budget_stop, llm_error, run_end.
+- Each run clears tests/generated/test_*.py first and copies the written tests into the run folder.
+- Exit codes: 0 done, 1 llm_error / missing key, 2 portal not reachable, 3 budget or policy stop.
+- Prices: gpt-4.1-mini $0.40 in / $1.60 out per 1M tokens (verify); mock is $0 with ~4 chars/token.
+- Not built yet: healing/triage loop, report.md, memory.
+
 ## Tools (exposed to the model)
 
 - `snapshot_page(url, label)`: signs in as the first test user and snapshots the `sign-in` and
@@ -151,8 +169,9 @@ In mock mode, write one test with a wrong selector first so healing is visible.
 2. Portal (good). ✅
 3. Portal (buggy, 4 planted bugs). ✅
 4. Tools: snapshot_page, compare_snapshots, write_test, run_tests + demo scripts. ✅
+4b. Harness + mock LLM + main.py (no healing/triage yet). ✅
 5. Memory.
-6. Harness + mock LLM + main.py.
+6. Healing / triage loop + report.md.
 7. Evals.
 8. CI (GitHub Actions + Azure Pipelines).
 9. README.

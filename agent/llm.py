@@ -1,0 +1,183 @@
+"""LLM clients behind one tiny interface: complete(messages, tools) -> LLMReply.
+
+OpenAILLM calls gpt-4.1-mini with tool calling. MockLLM replays a scripted list of tool calls, so the
+whole harness runs for $0 with no API key (CI, demos, evals).
+"""
+
+import itertools
+import json
+import os
+from dataclasses import dataclass, field
+
+
+@dataclass
+class ToolCall:
+    id: str
+    name: str
+    arguments: str  # raw JSON string, exactly as the model sent it (the harness validates it)
+
+
+@dataclass
+class LLMReply:
+    content: str | None
+    tool_calls: list[ToolCall] = field(default_factory=list)
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+
+
+class OpenAILLM:
+    def __init__(self, model: str = "gpt-4.1-mini", max_completion_tokens: int = 4000):
+        from openai import OpenAI  # imported here so --mock never needs the package configured
+
+        api_key = os.environ.get("OPENAI_API_KEY")
+        if not api_key:
+            raise RuntimeError("OPENAI_API_KEY is not set. Put it in .env (see .env.example) or use --mock.")
+        self.client = OpenAI(api_key=api_key)
+        self.model = model
+        self.max_completion_tokens = max_completion_tokens
+
+    def complete(self, messages: list[dict], tools: list[dict]) -> LLMReply:
+        response = self.client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            tools=tools,
+            tool_choice="auto",
+            temperature=0,
+            max_completion_tokens=self.max_completion_tokens,  # bounds how far one call can overshoot
+        )
+        message = response.choices[0].message
+        return LLMReply(
+            content=message.content,
+            tool_calls=[ToolCall(tc.id, tc.function.name, tc.function.arguments) for tc in message.tool_calls or []],
+            prompt_tokens=response.usage.prompt_tokens,
+            completion_tokens=response.usage.completion_tokens,
+        )
+
+
+class MockLLM:
+    """Scripted fake model. Each turn is a list of (tool_name, args) or a final text message.
+    Token counts are estimated (~4 chars per token) so the token budget is exercised; cost is $0."""
+
+    model = "mock"
+
+    def __init__(self, turns):
+        self.turns = iter(turns)
+        self.call_ids = itertools.count(1)
+
+    def complete(self, messages: list[dict], tools: list[dict]) -> LLMReply:
+        turn = next(self.turns, "Mock script finished.")
+        if callable(turn):
+            turn = turn(messages)
+        prompt_tokens = len(json.dumps(messages)) // 4 + len(json.dumps(tools)) // 4
+
+        if isinstance(turn, str):
+            return LLMReply(content=turn, prompt_tokens=prompt_tokens, completion_tokens=len(turn) // 4)
+
+        calls = [ToolCall(f"call_{next(self.call_ids)}", name, json.dumps(args)) for name, args in turn]
+        completion_tokens = sum(len(c.arguments) for c in calls) // 4
+        return LLMReply(content=None, tool_calls=calls, prompt_tokens=prompt_tokens, completion_tokens=completion_tokens)
+
+
+# ---------------------------------------------------------------- mock scenarios
+
+# Journey tests a model would write. They use conftest fixtures: page, base_url, patient, signed_in.
+JOURNEY_TESTS = {
+    "test_sign_in.py": '''\
+from playwright.sync_api import Page, expect
+
+
+def test_sign_in_with_valid_credentials(page: Page, base_url: str, patient: dict):
+    page.goto(base_url + "index.html")
+    page.get_by_label("Email").fill(patient["email"])
+    page.get_by_label("Password").fill(patient["password"])
+    page.get_by_role("button", name="Sign in").click()
+    expect(page).to_have_url(base_url + "dashboard.html")
+    expect(page.get_by_role("heading", name=f"Welcome, {patient['name']}")).to_be_visible()
+
+
+def test_wrong_password_shows_alert(page: Page, base_url: str, patient: dict):
+    page.goto(base_url + "index.html")
+    page.get_by_label("Email").fill(patient["email"])
+    page.get_by_label("Password").fill("wrong-password")
+    page.get_by_label("Password").press("Enter")
+    expect(page.get_by_role("alert")).to_have_text("Incorrect email or password. Please try again.")
+    expect(page).to_have_url(base_url + "index.html")
+''',
+    "test_appointments.py": '''\
+from playwright.sync_api import Page, expect
+
+
+def test_upcoming_appointments_listed(signed_in: Page):
+    expect(signed_in.get_by_role("heading", name="Upcoming appointments")).to_be_visible()
+    expect(signed_in.get_by_role("listitem")).to_have_count(2)
+''',
+    "test_lab_results.py": '''\
+from playwright.sync_api import Page, expect
+
+
+def test_lab_results_shown_in_iframe(signed_in: Page, patient: dict):
+    lab = signed_in.frame_locator("#lab-results-frame")
+    expect(lab.get_by_role("heading", name="Lab results")).to_be_visible()
+    expect(lab.get_by_role("row")).to_have_count(4)  # header + 3 results
+    expect(lab.get_by_role("cell", name=patient["labResults"][0]["test"])).to_be_visible()
+''',
+    "test_download_pdf.py": '''\
+from playwright.sync_api import Page, expect
+
+
+def test_download_lab_results_pdf(signed_in: Page, patient: dict):
+    lab = signed_in.frame_locator("#lab-results-frame")
+    with signed_in.expect_download() as download_info:
+        lab.get_by_role("button", name="Download PDF").click()
+    assert download_info.value.suggested_filename == f"lab-results-{patient['mrn']}.pdf"
+    expect(lab.get_by_role("status")).to_have_text("Download started")
+''',
+}
+
+
+def _summarize_last_run(messages: list[dict]) -> str:
+    """Mock's final message, built from the last run_tests result it was shown."""
+    for message in reversed(messages):
+        if message["role"] == "tool" and '"passed"' in message["content"]:
+            result = json.loads(message["content"])
+            failed = [r["test"] for r in result["results"] if r["outcome"] != "passed"]
+            return (f"Mock QE run complete: {result['passed']} passed, {len(failed)} failed. "
+                    f"Failing: {', '.join(failed) or 'none'}.")
+    return "Mock QE run complete (no test results seen)."
+
+
+def qe_scenario(baseline_url: str, release_url: str) -> list:
+    """Happy path: snapshot both releases, diff, write journey tests, run them, summarize."""
+    return [
+        [("snapshot_page", {"url": baseline_url, "label": "baseline"}),
+         ("snapshot_page", {"url": release_url, "label": "release"})],
+        [("compare_snapshots", {"baseline": "baseline", "new": "release"})],
+        [("write_test", {"filename": name, "code": code}) for name, code in JOURNEY_TESTS.items()],
+        [("run_tests", {})],
+        _summarize_last_run,
+    ]
+
+
+def guardrails_scenario(baseline_url: str, release_url: str) -> list:
+    """A misbehaving model: bad arguments, then off-site URLs until the harness stops the run."""
+    return [
+        [("compare_snapshots", {"baseline": "baseline"})],                                   # missing arg
+        [("write_test", {"filename": "../conftest.py", "code": "def test_x(): pass"})],      # bad filename
+        [("run_tests", {"base_url": "https://evil.example.com/"})],                          # not the model's to set
+        [("delete_everything", {})],                                                        # unknown tool
+        [("snapshot_page", {"url": "https://example.com/", "label": "offsite"})],
+        [("snapshot_page", {"url": "http://localhost.evil.com:8000/good/", "label": "lookalike"})],
+        [("snapshot_page", {"url": "http://169.254.169.254/latest/meta-data/", "label": "metadata"})],
+        "This line is never reached: the harness stops after 3 blocked URLs.",
+    ]
+
+
+def runaway_scenario(baseline_url: str, release_url: str):
+    """A model stuck in a loop: compares the same snapshots forever until MAX_STEPS stops it."""
+    yield [("snapshot_page", {"url": baseline_url, "label": "baseline"}),
+           ("snapshot_page", {"url": release_url, "label": "release"})]
+    while True:
+        yield [("compare_snapshots", {"baseline": "baseline", "new": "release"})]
+
+
+MOCK_SCENARIOS = {"qe": qe_scenario, "guardrails": guardrails_scenario, "runaway": runaway_scenario}

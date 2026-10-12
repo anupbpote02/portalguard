@@ -26,6 +26,18 @@ def patients() -> list[dict]:
     return load_test_users()
 
 
+@pytest.fixture
+def signed_in(page, base_url, patient):
+    """A page already on the dashboard. Signs in by label + Enter (not the button), so tests that
+    use this fixture don't fail because of a sign-in button bug they aren't testing."""
+    page.goto(base_url + "index.html")
+    page.get_by_label("Email").fill(patient["email"])
+    page.get_by_label("Password").fill(patient["password"])
+    page.get_by_label("Password").press("Enter")
+    page.wait_for_url("**/dashboard.html")
+    return page
+
+
 @pytest.fixture(autouse=True)
 def localhost_only(context):
     """Enforce the URL allowlist inside the browser: any non-localhost request is aborted."""
