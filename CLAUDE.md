@@ -86,6 +86,9 @@ Served with: `python -m http.server 8000 --directory portal`
 - Content is rendered by JS after a fetch, so snapshots/tests must sign in first and wait for content.
 - Download tests must use Playwright `page.expect_download()` and check `suggested_filename`;
   the status text alone is not proof of a download.
+- Snapshot coverage: the aria diff of the signed-in dashboard (+ iframe) only catches BUG-2/BUG-3.
+  `snapshot_page` must also snapshot the sign-in page (BUG-1), and BUG-4 is functional, so it's only
+  caught by a test (it doesn't change the aria tree).
 
 ### Planted bugs (buggy release only)
 
@@ -94,7 +97,10 @@ Served with: `python -m http.server 8000 --directory portal`
 | BUG-1 | "Sign in" button has no accessible name (icon only)     | a11y       | index.html                    |
 | BUG-2 | "Upcoming appointments" heading removed                 | a11y       | dashboard.html                |
 | BUG-3 | "Lab results" heading removed                           | a11y       | lab-results.html (in iframe)  |
-| BUG-4 | "Download PDF" does nothing                             | functional | lab-results.html (in iframe)  |
+| BUG-4 | "Download PDF" does nothing (no file, no message)       | functional | lab-results.html (in iframe)  |
+
+`diff -r portal/good portal/buggy` shows exactly these 4 changes and nothing else. The buggy
+files carry no "BUG" comments, so they look like a real release.
 
 ## Tools (exposed to the model)
 
@@ -124,10 +130,11 @@ In mock mode, write one test with a wrong selector first so healing is visible.
 ## Build steps
 
 1. Setup: CLAUDE.md, folder structure, requirements.txt, .env.example, .gitignore. ✅
-2. Portal (good + buggy).
-3. Tools (snapshot / compare / write_test / run_tests).
-4. Memory.
-5. Harness + mock LLM + main.py.
-6. Evals.
-7. CI (GitHub Actions + Azure Pipelines).
-8. README.
+2. Portal (good). ✅
+3. Portal (buggy, 4 planted bugs). ✅
+4. Tools (snapshot / compare / write_test / run_tests).
+5. Memory.
+6. Harness + mock LLM + main.py.
+7. Evals.
+8. CI (GitHub Actions + Azure Pipelines).
+9. README.

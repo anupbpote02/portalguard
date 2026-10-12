@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lab results - Harbor General Patient Portal</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="frame-body">
+  <main class="card">
+
+    <table>
+      <thead>
+        <tr><th>Test</th><th>Result</th><th>Reference range</th><th>Date</th></tr>
+      </thead>
+      <tbody id="lab-rows"></tbody>
+    </table>
+
+    <button id="download-pdf" type="button">Download PDF</button>
+    <p id="download-status" class="status" role="status"></p>
+  </main>
+
+  <script>
+    // Loaded inside the dashboard iframe; same origin, so it shares the demo session.
+    let currentUser = null;
+
+    (async function () {
+      const email = sessionStorage.getItem("portalUser");
+      const data = await fetch("../test-users.json").then(function (r) { return r.json(); });
+      const user = data.users.find(function (u) { return u.email === email; });
+      if (!user) return;
+      currentUser = user;
+
+      const rows = document.getElementById("lab-rows");
+      user.labResults.forEach(function (lab) {
+        const row = document.createElement("tr");
+        [lab.test, lab.result, lab.range, lab.date].forEach(function (value) {
+          const cell = document.createElement("td");
+          cell.textContent = value;
+          row.appendChild(cell);
+        });
+        rows.appendChild(row);
+      });
+    })();
+
+    // Builds a tiny one-page PDF in the browser (no server, no PDF library).
+    // A PDF is text objects plus an "xref" table of byte offsets; all content here is ASCII,
+    // so string length == byte length.
+    function buildPdf(lines) {
+      const escape = function (s) { return s.replace(/[\\()]/g, function (c) { return "\\" + c; }); };
+      let text = "BT /F1 11 Tf 72 740 Td 16 TL\n";
+      lines.forEach(function (line) { text += "(" + escape(line) + ") Tj T*\n"; });
+      text += "ET";
+
+      const objects = [
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+        "<< /Length " + text.length + " >>\nstream\n" + text + "\nendstream",
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"
+      ];
+
+      let pdf = "%PDF-1.4\n";
+      const offsets = [];
+      objects.forEach(function (body, i) {
+        offsets.push(pdf.length);
+        pdf += (i + 1) + " 0 obj\n" + body + "\nendobj\n";
+      });
+      const xrefStart = pdf.length;
+      pdf += "xref\n0 " + (objects.length + 1) + "\n0000000000 65535 f \n";
+      offsets.forEach(function (offset) { pdf += String(offset).padStart(10, "0") + " 00000 n \n"; });
+      pdf += "trailer\n<< /Size " + (objects.length + 1) + " /Root 1 0 R >>\nstartxref\n" + xrefStart + "\n%%EOF\n";
+      return pdf;
+    }
+
+    function downloadLabResultsPdf(user) {
+      const lines = [
+        "DEMO DATA - SYNTHETIC TEST RECORD - NOT A REAL PATIENT - NOT FOR CLINICAL USE",
+        "Harbor General Patient Portal - Lab results",
+        "",
+        "Patient: " + user.name,
+        "MRN: " + user.mrn,
+        ""
+      ];
+      user.labResults.forEach(function (lab) {
+        lines.push(lab.test + ": " + lab.result + "  (reference " + lab.range + ")  " + lab.date);
+      });
+
+      const blob = new Blob([buildPdf(lines)], { type: "application/pdf" });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = "lab-results-" + user.mrn + ".pdf";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(function () { URL.revokeObjectURL(link.href); }, 1000);
+    }
+
+    document.getElementById("download-pdf").addEventListener("click", function () {
+      if (!currentUser) return;
+    });
+  </script>
+</body>
+</html>
