@@ -1,0 +1,15 @@
+# Secrets
+.env
+
+# Agent run output (traces, snapshots, reports)
+runs/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# Playwright
+test-results/
+playwright-report/
