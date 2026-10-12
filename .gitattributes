@@ -1,0 +1,7 @@
+# Keep LF line endings everywhere so Windows checkouts and Linux CI runners see identical files.
+* text=auto eol=lf
+
+# Never touch binary files.
+*.pdf binary
+*.png binary
+*.ico binary
