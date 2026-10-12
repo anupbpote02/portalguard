@@ -13,3 +13,6 @@ __pycache__/
 # Playwright
 test-results/
 playwright-report/
+
+# Agent-written tests are run output (conftest.py stays tracked)
+tests/generated/test_*.py

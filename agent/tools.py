@@ -1,12 +1,19 @@
 """Tools the agent can call.
 
 Each tool saves big data to disk and returns only a short summary (short-term memory):
-the model never sees a full aria snapshot, only what changed.
+the model never sees a full aria snapshot or pytest log, only what matters.
+
+Convention: bad arguments raise ValueError (the harness turns that into an error message for the
+model); problems in the environment (server down, test timeout) come back in an "error" field.
 """
 
+import ast
 import difflib
 import json
 import re
+import subprocess
+import sys
+import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
@@ -17,10 +24,21 @@ from playwright.sync_api import sync_playwright
 REPO_ROOT = Path(__file__).resolve().parent.parent
 TEST_USERS_FILE = REPO_ROOT / "portal" / "test-users.json"
 DEFAULT_SNAPSHOT_DIR = REPO_ROOT / "runs" / "adhoc" / "snapshots"
+DEFAULT_RESULTS_DIR = REPO_ROOT / "runs" / "adhoc" / "test-results"
+GENERATED_TESTS_DIR = REPO_ROOT / "tests" / "generated"
 
 ALLOWED_HOSTS = {"localhost", "127.0.0.1"}
 PAGE_TIMEOUT_MS = 10_000
 MAX_CHANGES_PER_FRAME = 20
+
+# write_test guardrails. Not a sandbox: CI runners are the real isolation boundary.
+TEST_FILENAME = re.compile(r"test_[a-z0-9_]{1,60}\.py")
+MAX_TEST_BYTES = 20_000
+ALLOWED_IMPORTS = {"re", "json", "pytest", "playwright.sync_api"}
+BLOCKED_CALLS = {"exec", "eval", "compile", "__import__", "open", "getattr", "setattr", "delattr",
+                 "globals", "locals", "vars", "breakpoint", "input"}
+TEST_RUN_TIMEOUT_S = 120
+MAX_ERROR_CHARS = 400
 
 # Lines like:  - heading "Lab results" [level=1]   or   - button
 ARIA_LINE = re.compile(r'^\s*- (?P<role>[a-z]+)(?: "(?P<name>[^"]*)")?')
@@ -104,6 +122,62 @@ def _describe(line: str) -> str:
     if match and match["role"] in NEEDS_NAME and not match["name"]:
         text += " (no accessible name)"
     return text
+
+
+def _check_test_code(code: str) -> list[str]:
+    """Static checks on model-written test code. Returns the test function names."""
+    if len(code.encode("utf-8")) > MAX_TEST_BYTES:
+        raise ValueError(f"test code is over {MAX_TEST_BYTES} bytes")
+    try:
+        tree = ast.parse(code)
+    except SyntaxError as e:
+        raise ValueError(f"syntax error on line {e.lineno}: {e.msg}") from None
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            modules = [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom):
+            modules = [node.module or ""]
+        else:
+            modules = []
+        for module in modules:
+            if module not in ALLOWED_IMPORTS:
+                raise ValueError(f"import '{module}' not allowed; allowed: {sorted(ALLOWED_IMPORTS)}")
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in BLOCKED_CALLS:
+            raise ValueError(f"call to '{node.func.id}' not allowed in tests")
+        if isinstance(node, ast.Attribute) and node.attr.startswith("__"):
+            raise ValueError(f"dunder attribute '{node.attr}' not allowed in tests")
+
+    tests = [n.name for n in tree.body if isinstance(n, ast.FunctionDef) and n.name.startswith("test_")]
+    if not tests:
+        raise ValueError("file must define at least one top-level test_* function")
+    return tests
+
+
+def _short_failure(element) -> str:
+    """Turn a long pytest/Playwright failure into one line the model can act on:
+    'line 14: AssertionError: ... | waiting for get_by_role("button", name="Log in")'
+    """
+    text = element.text or element.get("message", "")
+    lines, waiting_for = [], None
+    in_call_log = False
+    for line in text.splitlines():
+        if not line.startswith("E "):
+            continue
+        detail = line[1:].strip().replace("playwright._impl._errors.", "")
+        if detail.startswith(("Call log", "=====")):
+            in_call_log = True
+        elif in_call_log:
+            if waiting_for is None and detail.lstrip("- ").startswith("waiting for "):
+                waiting_for = detail.lstrip("- ")
+        elif detail:
+            lines.append(detail)
+    if waiting_for and not any(waiting_for.removeprefix("waiting for ") in line for line in lines):
+        lines.append(waiting_for)
+
+    location = re.search(r"(test_[a-z0-9_]+\.py):(\d+):", text)  # first frame = the test's own line
+    prefix = f"line {location[2]}: " if location else ""
+    return (prefix + (" | ".join(lines) or element.get("message", "failed")))[:MAX_ERROR_CHARS]
 
 
 # ---------------------------------------------------------------- tools
@@ -228,4 +302,79 @@ def compare_snapshots(baseline: str, new: str, snapshot_dir: Path = DEFAULT_SNAP
         "unchanged": unchanged,
         "new_js_errors": new_js_errors,
         "new_release_error": new_data["error"],
+    }
+
+
+def write_test(filename: str, code: str) -> dict:
+    """Write a Playwright test file into tests/generated/ (test_*.py only, checked before writing)."""
+    if not TEST_FILENAME.fullmatch(filename):
+        raise ValueError("filename must look like test_<lowercase_words>.py (no folders)")
+    tests = _check_test_code(code)
+
+    path = GENERATED_TESTS_DIR / filename
+    existed = path.exists()
+    path.write_text(code, encoding="utf-8", newline="\n")
+    return {
+        "written": str(path.relative_to(REPO_ROOT)),
+        "overwrote": existed,
+        "tests": tests,
+    }
+
+
+def run_tests(base_url: str, filename: str | None = None, results_dir: Path = DEFAULT_RESULTS_DIR) -> dict:
+    """Run generated tests against one release with pytest; return pass/fail per test.
+
+    base_url is set by the harness (the release under test), not by the model.
+    Pass/fail comes from Playwright assertions via pytest's JUnit XML, never from the LLM.
+    """
+    check_url(base_url)
+    base_url = release_base(base_url)
+    if filename is not None:
+        if not TEST_FILENAME.fullmatch(filename):
+            raise ValueError("filename must look like test_<lowercase_words>.py")
+        if not (GENERATED_TESTS_DIR / filename).exists():
+            raise ValueError(f"no such test file: {filename}")
+    target = GENERATED_TESTS_DIR / filename if filename else GENERATED_TESTS_DIR
+
+    results_dir = Path(results_dir)
+    results_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().strftime("%H%M%S-%f")
+    junit_path = results_dir / f"junit-{stamp}.xml"
+    log_path = results_dir / f"pytest-{stamp}.log"
+
+    command = [sys.executable, "-m", "pytest", str(target), "--base-url", base_url,
+               "-q", "-p", "no:cacheprovider", f"--junitxml={junit_path}"]
+    try:
+        proc = subprocess.run(command, cwd=REPO_ROOT, capture_output=True, text=True,
+                              encoding="utf-8", errors="replace", timeout=TEST_RUN_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        return {"error": f"test run timed out after {TEST_RUN_TIMEOUT_S}s", "base_url": base_url}
+    log_path.write_text(proc.stdout + proc.stderr, encoding="utf-8")
+
+    if not junit_path.exists():
+        tail = (proc.stdout + proc.stderr).strip().splitlines()[-3:]
+        return {"error": "pytest did not run: " + " | ".join(tail), "base_url": base_url}
+
+    results = []
+    for case in ET.parse(junit_path).getroot().iter("testcase"):
+        file = case.get("classname", "").rsplit(".", 1)[-1] + ".py"
+        result = {"test": f"{file}::{case.get('name')}", "outcome": "passed"}
+        for tag in ("failure", "error", "skipped"):
+            element = case.find(tag)
+            if element is not None:
+                result["outcome"] = "failed" if tag == "failure" else tag
+                result["message"] = _short_failure(element)
+                break
+        results.append(result)
+
+    def count(outcome):
+        return sum(r["outcome"] == outcome for r in results)
+
+    return {
+        "base_url": base_url,
+        "passed": count("passed"),
+        "failed": count("failed"),
+        "errors": count("error"),
+        "results": results,
+        "log": str(log_path.relative_to(REPO_ROOT) if log_path.is_relative_to(REPO_ROOT) else log_path),
     }

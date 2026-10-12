@@ -54,7 +54,10 @@ agent/
   memory.py    short-term (disk snapshots) + long-term (memory/memory.json)
   main.py      CLI entry point (--mock, --release ...)
   diff_releases.py  no-LLM helper: snapshot good + buggy and print the diff
-tests/generated/        tests written by the agent (test_*.py only)
+  demo_tools.py     no-LLM helper: write one sample test, run it on good (pass) + buggy (fail)
+tests/generated/        tests written by the agent (test_*.py only, gitignored)
+tests/generated/conftest.py  human-written: patient fixture, localhost-only route guard, 5s timeouts
+pytest.ini              pythonpath=., default base_url = good release
 memory/memory.json      long-term memory
 runs/<timestamp>/       trace.jsonl, snapshots/, report.md   (gitignored)
 evals/expected_bugs.json
@@ -112,8 +115,17 @@ files carry no "BUG" comments, so they look like a real release.
   JS errors, and any error (HTTP 404, connection refused, timeout) instead of raising.
 - `compare_snapshots(baseline, new)`: labels or .json paths. Returns REMOVED / ADDED / CHANGED lines
   per `page / frame` (max 20 each), flags controls with no accessible name, new JS errors.
-- `write_test(filename, code)`: only `test_*.py`, only inside `tests/generated/`.
-- `run_tests()`: runs pytest with a timeout; returns short results.
+- `write_test(filename, code)`: only `test_[a-z0-9_]+.py`, only inside `tests/generated/`. AST checks
+  before writing: syntax, imports limited to re/json/pytest/playwright.sync_api, no exec/eval/open/
+  __import__/dunder access, must define a test_* function, max 20 KB. A guardrail, not a sandbox.
+- `run_tests(filename=None)`: model-facing arg is only the optional filename; `base_url` (release
+  under test) is bound by the harness. Runs pytest with `--base-url`, 120s timeout, reads JUnit XML
+  for pass/fail. Each failure is one line: test line number, error, and the locator Playwright was
+  waiting for. Full log saved to the run folder.
+- Tool convention: bad arguments raise ValueError (harness returns it to the model as an error);
+  environment problems (server down, timeout) come back in an `error` field.
+- Generated tests use fixtures `page`, `base_url`, `patient` (first test user), `patients`, and should
+  sign in by label + Enter unless the test is about the sign-in button, so each test fails for one reason.
 
 ## QE loop
 
@@ -138,7 +150,7 @@ In mock mode, write one test with a wrong selector first so healing is visible.
 1. Setup: CLAUDE.md, folder structure, requirements.txt, .env.example, .gitignore. ✅
 2. Portal (good). ✅
 3. Portal (buggy, 4 planted bugs). ✅
-4. Tools: snapshot_page + compare_snapshots + diff script. ✅ (write_test / run_tests next)
+4. Tools: snapshot_page, compare_snapshots, write_test, run_tests + demo scripts. ✅
 5. Memory.
 6. Harness + mock LLM + main.py.
 7. Evals.
