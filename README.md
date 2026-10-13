@@ -65,6 +65,16 @@ python -m evals.run_eval
 python -m pytest tests/unit -q
 ```
 
+**Test patients** (from `portal/test-users.json`; sign in at http://localhost:8000/good/ or /buggy/)
+
+| Name | Email | Password | MRN |
+|---|---|---|---|
+| Jordan Rivera | `jordan.rivera@test.example` | `Test123!` | `TEST-000123` |
+| Casey Morgan | `casey.morgan@test.example` | `Test456!` | `TEST-000456` |
+| Riley Nguyen | `riley.nguyen@test.example` | `Test789!` | `TEST-000789` |
+
+MRN = Medical Record Number. All patients are fictional; every MRN starts with TEST-.
+
 Each run writes `runs/<timestamp>/report.md` (bugs with evidence), `trace.jsonl` (every step),
 the snapshots, and the tests the agent wrote.
 
@@ -274,18 +284,50 @@ by the good build id, and memory carried between pipeline runs as a cache.
 ## Project layout
 
 ```
-portal/            good/ and buggy/ releases, test-users.json (synthetic)
-agent/
-  harness.py       loop, budgets, allowlist, validation, trace, coverage + retries
-  llm.py           OpenAILLM (gpt-4.1-mini) and MockLLM with scripted scenarios
-  tools.py         snapshot_page, compare_snapshots, write_test, run_tests
-  triage.py        verdicts per failing test, baseline as oracle, per-test lock
-  coverage.py      does each journey test actually exercise the journey
-  memory.py        long-term memory (baseline, selectors, known bugs, flaky tests)
-  report.py        runs/<id>/report.md from harness records
-  main.py          CLI: python -m agent.main --mock
-evals/             expected_bugs.json (answer key), run_eval.py, history/ (real runs)
-tests/unit/        47 unit tests, no browser
-tests/generated/   conftest.py (fixtures, localhost guard); agent tests land here
-.github/workflows/qe.yml, azure-pipelines.yml
+portalguard/
+├── portal/                       # the patient portal under test (plain HTML/CSS/JS)
+│   ├── good/                     # last good release
+│   │   ├── index.html            # sign-in page
+│   │   ├── dashboard.html        # welcome, appointments, lab results iframe
+│   │   ├── lab-results.html      # loaded inside the iframe; table + Download PDF
+│   │   ├── styles.css            # shared styles
+│   │   └── favicon.svg           # tab icon
+│   ├── buggy/                    # same pages with the 4 planted bugs
+│   └── test-users.json           # 3 synthetic test patients (used by portal and tests)
+├── agent/                        # the QE agent
+│   ├── main.py                   # CLI: python -m agent.main --mock
+│   ├── harness.py                # loop, budgets, allowlist, validation, trace, retries
+│   ├── llm.py                    # OpenAILLM (gpt-4.1-mini) and MockLLM scenarios
+│   ├── tools.py                  # snapshot_page, compare_snapshots, write_test, run_tests
+│   ├── triage.py                 # verdict per failing test; baseline as oracle; per-test lock
+│   ├── coverage.py               # does each journey test exercise the journey
+│   ├── memory.py                 # long-term memory: baseline, selectors, known bugs, flaky
+│   ├── report.py                 # writes runs/<id>/report.md from harness records
+│   ├── diff_releases.py          # no-LLM helper: aria diff of good vs buggy
+│   ├── demo_tools.py             # no-LLM helper: write + run one sample test
+│   └── __init__.py
+├── evals/                        # scoring the agent against the planted bugs
+│   ├── expected_bugs.json        # answer key: 4 bugs with deterministic match rules
+│   ├── run_eval.py               # python -m evals.run_eval [--real] [--repeat N]
+│   ├── history/                  # committed real-model eval runs (before/after fixes)
+│   ├── results.json, results.md  # latest eval output (gitignored)
+│   └── __init__.py
+├── tests/
+│   ├── unit/                     # 47 unit tests, no browser: python -m pytest tests/unit
+│   └── generated/                # where the agent writes its tests (test_*.py gitignored)
+│       └── conftest.py           # human-written fixtures + localhost-only route guard
+├── memory/                       # long-term memory (gitignored, created at runtime)
+│   ├── memory.json               # baseline path, selectors, reported bugs, flaky tests
+│   └── baselines/                # saved copy of the baseline snapshot
+├── runs/                         # one folder per run (gitignored)
+│   └── <timestamp>/              # report.md, trace.jsonl, snapshots/, test-results/, tests/
+├── .github/
+│   └── workflows/
+│       └── qe.yml                # GitHub Actions: unit tests + mock eval gate
+├── azure-pipelines.yml           # Azure DevOps: same steps, JUnit + artifacts
+├── CLAUDE.md                     # build plan and design notes
+├── README.md                     # this file
+├── requirements.txt              # Python dependencies
+├── pytest.ini                    # pythonpath = ., default base_url = good release
+└── .env.example                  # template for OPENAI_API_KEY (.env is gitignored)
 ```
