@@ -33,11 +33,23 @@ MAX_CHANGES_PER_FRAME = 20
 
 # write_test guardrails. Not a sandbox: CI runners are the real isolation boundary.
 TEST_FILENAME = re.compile(r"test_[a-z0-9_]{1,60}\.py")
+# What a test file covers. Display names match the QE plan; diff_check = a test written for a snapshot
+# diff (no journey, so a failure needs diff evidence to count as a bug).
+JOURNEYS = {
+    "sign_in": "Sign in",
+    "wrong_password": "Wrong password shows an error",
+    "appointments": "See upcoming appointments",
+    "lab_results": "View lab results",
+    "download_pdf": "Download lab results PDF",
+    "diff_check": None,
+}
+JOURNEY_KEYS = list(JOURNEYS)
 MAX_TEST_BYTES = 20_000
 ALLOWED_IMPORTS = {"re", "json", "pytest", "playwright.sync_api"}
 BLOCKED_CALLS = {"exec", "eval", "compile", "__import__", "open", "getattr", "setattr", "delattr",
                  "globals", "locals", "vars", "breakpoint", "input"}
 TEST_RUN_TIMEOUT_S = 120
+LOCATOR_REPR = re.compile(r"<Locator frame=<Frame name=[^>]*> selector='([^']*)'>")
 MAX_ERROR_CHARS = 400
 
 # Lines like:  - heading "Lab results" [level=1]   or   - button
@@ -159,6 +171,8 @@ def _short_failure(element) -> str:
     'line 14: AssertionError: ... | waiting for get_by_role("button", name="Log in")'
     """
     text = element.text or element.get("message", "")
+    # pytest's assert rewriting prints '<Locator frame=<Frame name= url='...'> selector='...'>'; keep the selector.
+    text = LOCATOR_REPR.sub(r"locator(\1)", text)
     lines, waiting_for = [], None
     in_call_log = False
     for line in text.splitlines():
@@ -305,10 +319,16 @@ def compare_snapshots(baseline: str, new: str, snapshot_dir: Path = DEFAULT_SNAP
     }
 
 
-def write_test(filename: str, code: str) -> dict:
-    """Write a Playwright test file into tests/generated/ (test_*.py only, checked before writing)."""
+def write_test(filename: str, code: str, journey: str) -> dict:
+    """Write a Playwright test file into tests/generated/ (test_*.py only, checked before writing).
+
+    journey says what the file tests (one of JOURNEY_KEYS); triage uses it to label bugs instead of
+    guessing from names.
+    """
     if not TEST_FILENAME.fullmatch(filename):
         raise ValueError("filename must look like test_<lowercase_words>.py (no folders)")
+    if journey not in JOURNEY_KEYS:
+        raise ValueError(f"journey must be one of: {', '.join(JOURNEY_KEYS)}")
     tests = _check_test_code(code)
 
     path = GENERATED_TESTS_DIR / filename
@@ -317,6 +337,7 @@ def write_test(filename: str, code: str) -> dict:
     return {
         "written": str(path.relative_to(REPO_ROOT)),
         "overwrote": existed,
+        "journey": journey,
         "tests": tests,
     }
 

@@ -1,0 +1,107 @@
+{
+  "mode": "real",
+  "repeats": 1,
+  "started_at": "2026-10-13T11:42:06",
+  "memory": "off",
+  "expected": [
+    {
+      "id": "BUG-1",
+      "title": "\"Sign in\" button has no accessible name (icon only)",
+      "type": "accessibility"
+    },
+    {
+      "id": "BUG-2",
+      "title": "\"Upcoming appointments\" heading removed",
+      "type": "accessibility"
+    },
+    {
+      "id": "BUG-3",
+      "title": "\"Lab results\" heading removed (inside the iframe)",
+      "type": "accessibility"
+    },
+    {
+      "id": "BUG-4",
+      "title": "\"Download PDF\" does nothing (no file, no message)",
+      "type": "functional"
+    }
+  ],
+  "totals": {
+    "recall": 1.0,
+    "precision": 1.0,
+    "type_accuracy": 1.0,
+    "false_alarms_on_good": 0,
+    "tests_healed": 7,
+    "steps": 30,
+    "tokens": 152009,
+    "cost_usd": 0.06831,
+    "duration_s": 385.5
+  },
+  "gate": {
+    "min_recall": 1.0,
+    "max_false_alarms": 0,
+    "passed": true
+  },
+  "runs": [
+    {
+      "repeat": 1,
+      "buggy": {
+        "run": {
+          "stop_reason": "done",
+          "steps": 21,
+          "tool_calls": 29,
+          "harness_test_runs": 27,
+          "total_tokens": 122362,
+          "total_cost_usd": 0.053679,
+          "duration_s": 336.7,
+          "healed": 7,
+          "report": "runs/eval-20261013-114206-r1-buggy/report.md"
+        },
+        "bugs_reported": 4,
+        "bug_titles": [
+          "REMOVED: heading \"Upcoming appointments\" [level=2] (dashboard / main)",
+          "Download lab results PDF journey broken (test_download_pdf.py::test_download_pdf)",
+          "CHANGED: button \"Sign in\"  ->  button (no accessible name) (sign-in / main)",
+          "REMOVED: heading \"Lab results\" [level=1] (dashboard / lab-results-frame)"
+        ],
+        "match": {
+          "found": {
+            "BUG-2": "REMOVED: heading \"Upcoming appointments\" [level=2] (dashboard / main)",
+            "BUG-4": "Download lab results PDF journey broken (test_download_pdf.py::test_download_pdf)",
+            "BUG-1": "CHANGED: button \"Sign in\"  ->  button (no accessible name) (sign-in / main)",
+            "BUG-3": "REMOVED: heading \"Lab results\" [level=1] (dashboard / lab-results-frame)"
+          },
+          "missed": [],
+          "duplicates": [],
+          "false_positives": [],
+          "recall": 1.0,
+          "precision": 1.0,
+          "type_accuracy": 1.0
+        }
+      },
+      "good": {
+        "run": {
+          "stop_reason": "done",
+          "steps": 9,
+          "tool_calls": 17,
+          "harness_test_runs": 5,
+          "total_tokens": 29647,
+          "total_cost_usd": 0.014631,
+          "duration_s": 48.8,
+          "healed": 0,
+          "report": "runs/eval-20261013-114206-r1-good/report.md"
+        },
+        "bugs_reported": 0,
+        "bug_titles": [],
+        "match": {
+          "found": {},
+          "missed": [],
+          "duplicates": [],
+          "false_positives": [],
+          "recall": 1.0,
+          "precision": 1.0,
+          "type_accuracy": null
+        }
+      }
+    }
+  ]
+}

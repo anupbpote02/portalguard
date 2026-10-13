@@ -35,8 +35,11 @@ All data is synthetic. You may only open localhost URLs.
 Do this, in order:
 1. snapshot_page the baseline (label "baseline") and the release (label "release").
 2. compare_snapshots("baseline", "release").
-3. write_test one file per key journey: sign in, see upcoming appointments, view lab results
-   (inside iframe #lab-results-frame), download the lab results PDF. Add a test for each diff.
+3. write_test one file per journey, with its journey argument:
+     test_sign_in.py (sign_in), test_wrong_password.py (wrong_password),
+     test_appointments.py (appointments), test_lab_results.py (lab_results, inside iframe
+     #lab-results-frame), test_download_pdf.py (download_pdf).
+   Put tests written for snapshot diffs in test_diff_checks.py (diff_check). One journey per file.
 4. run_tests (it runs against the release). The harness triages every failure and adds a "triage"
    verdict per test:
    - broken_test: the test also fails on the baseline, so the test is wrong. Fix it with write_test
@@ -47,6 +50,9 @@ Do this, in order:
 Test rules: Python, pytest + Playwright sync API, only import from playwright.sync_api / pytest / re / json.
 Fixtures: page, base_url (ends with "/"), patient (dict: email, password, name, mrn, appointments,
 labResults), signed_in (page already on the dashboard). Use get_by_role / get_by_label locators.
+Assert with expect(...) (it waits for the page), e.g. expect(locator).to_be_visible(),
+expect(page).to_have_url(...). Never assert locator.is_visible(): it does not wait and gives flaky tests.
+The sign-in page is base_url + "index.html".
 Use page.frame_locator("#lab-results-frame") for the lab results. Check downloads with
 page.expect_download() and suggested_filename == f"lab-results-{patient['mrn']}.pdf".
 Use signed_in unless the test is about signing in, so each test fails for one reason only."""
@@ -68,10 +74,13 @@ TOOL_SCHEMAS = [
         }}}},
     {"type": "function", "function": {
         "name": "write_test",
-        "description": "Write a pytest + Playwright test file into tests/generated/.",
-        "parameters": {"type": "object", "additionalProperties": False, "required": ["filename", "code"], "properties": {
+        "description": "Write a pytest + Playwright test file into tests/generated/. One journey per file.",
+        "parameters": {"type": "object", "additionalProperties": False,
+                       "required": ["filename", "code", "journey"], "properties": {
             "filename": {"type": "string", "pattern": "^test_[a-z0-9_]{1,60}\\.py$"},
             "code": {"type": "string", "maxLength": 20_000},
+            "journey": {"type": "string", "enum": tools.JOURNEY_KEYS,
+                        "description": "What this file tests; diff_check = tests written for snapshot diffs"},
         }}}},
     {"type": "function", "function": {
         "name": "run_tests",
@@ -118,6 +127,8 @@ def validate_args(schema: dict, args) -> str | None:
             return f"'{name}' is longer than {rules['maxLength']} characters"
         if "pattern" in rules and not re.fullmatch(rules["pattern"], value):
             return f"'{name}' must match {rules['pattern']}"
+        if "enum" in rules and value not in rules["enum"]:
+            return f"'{name}' must be one of: {', '.join(rules['enum'])}"
     return None
 
 
@@ -203,12 +214,12 @@ class Harness:
 
         fixes = []
         if call.name == "write_test":
-            refusal = self.triage.before_write(args["filename"])
-            if refusal:
-                return "refused", {"error": refusal}
             # Locators that failed on the baseline in an earlier run are swapped for the ones that fixed them.
             # Triage still checks the result against the baseline, so a bad memory can't sneak through.
             args["code"], fixes = self.memory.apply_selector_fixes(args["code"])
+            refusal = self.triage.before_write(args["filename"], args["code"])
+            if refusal:
+                return "refused", {"error": refusal}
             self.memory_fixes += [f"{args['filename']}: {fix}" for fix in fixes]
 
         if call.name == "snapshot_page" and self.cached_baseline and self._is_baseline(args["url"]):
@@ -219,7 +230,7 @@ class Harness:
         bound = {
             "snapshot_page": lambda: tools.snapshot_page(args["url"], args["label"], snapshot_dir=snapshots),
             "compare_snapshots": lambda: tools.compare_snapshots(args["baseline"], args["new"], snapshot_dir=snapshots),
-            "write_test": lambda: tools.write_test(args["filename"], args["code"]),
+            "write_test": lambda: tools.write_test(args["filename"], args["code"], args["journey"]),
             "run_tests": lambda: tools.run_tests(self.release_url, args.get("filename"),
                                                  results_dir=self.run_dir / "test-results"),
         }
@@ -238,6 +249,7 @@ class Harness:
             if self._is_baseline(args["url"]) and not result["js_errors"]:
                 self.fresh_baseline = (snapshots / f"{args['label']}.json", result)
         elif call.name == "write_test":
+            self.triage.record_write(args["filename"], args["journey"])
             self.code_versions.setdefault(args["filename"], []).append(args["code"])
             if fixes:
                 result["memory_fixes"] = fixes

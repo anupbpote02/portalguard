@@ -134,10 +134,15 @@ After every model `run_tests` on the release, the harness triages each failing t
    baseline_error + baseline_has (frame ids, headings, buttons) and heals with write_test. Max 3
    attempts per file, then `gave_up` (Needs human review) and further writes are refused.
 2. Passes on baseline -> rerun on release (FLAKY_RERUNS=1). Passes now -> `flaky`, not reported.
-3. Fails 2/2 on release -> `real_bug` if a diff line mentions a name the locator waited for
-   (accessibility) or the file maps to a journey (functional); else `unconfirmed`.
-- write_test on a file proving a real_bug is refused (the agent can't heal a bug away).
-- Same code + decided verdict -> no extra runs. Passing tests cost no extra runs.
+3. Fails 2/2 on release -> `real_bug` if a diff line mentions a name the failing check was about
+   (accessibility) or the file has a journey (functional); else `unconfirmed`.
+   - Names = `name="..."` in the failure message + quoted strings on the test's FAILING LINE only
+     (not the whole test, so a test that clicks "Sign in" then fails on download isn't BUG-1).
+   - Journey = write_test's required `journey` argument for that file (never guessed from names).
+     `diff_check` has no journey, so its failures need diff evidence.
+- Lock is per test function: a write_test that changes or removes a test proving a real_bug is
+  refused; other tests in the same file can still be healed (compared by AST, ignores comments).
+- Same test-function code (per-function AST hash) + decided verdict -> no extra runs.
 - Why baseline first: a wrong selector like `#labs-frame` waits for name="Lab results", which also
   matches the BUG-3 diff line. Name matching alone would call a broken test a bug.
 - Mock qe: lab results test starts with `#labs-frame`, heal 1 `#lab_results_frame` (still wrong),
@@ -177,6 +182,13 @@ After every model `run_tests` on the release, the harness triages each failing t
   tests healed, steps, tokens, cost, duration. Mean over repeats; misses listed per run.
 - Gate: exit 1 if recall < --min-recall (1.0) or false alarms > --max-false-alarms (0); exit 2 if
   --real has no key. Mock result: 100% recall/precision/type, 0 false alarms, 2 healed, 18 steps.
+- evals/history/ (committed): before/after evidence for the README.
+  - `2026-10-13-real-before-fixes/`: first real run, 75% recall / 60% precision; analysis.md has
+    the 4 harness causes (journey from filename, diff evidence from error text only, per-file lock,
+    no auto-wait guidance in prompt). Answer key and scoring rules were NOT changed by the fixes.
+  - `2026-10-13-real-after-fixes-r1/`: 100% / 100%, $0.068, but 21/25 steps and 122k/150k tokens
+    (all first-draft tests used positional `name`; sign-in heals guessed "Email address" because
+    baseline_has lists only headings/buttons, not textbox labels).
 
 ## Tools (exposed to the model)
 
@@ -187,7 +199,9 @@ After every model `run_tests` on the release, the harness triages each failing t
   JS errors, and any error (HTTP 404, connection refused, timeout) instead of raising.
 - `compare_snapshots(baseline, new)`: labels or .json paths. Returns REMOVED / ADDED / CHANGED lines
   per `page / frame` (max 20 each), flags controls with no accessible name, new JS errors.
-- `write_test(filename, code)`: only `test_[a-z0-9_]+.py`, only inside `tests/generated/`. AST checks
+- `write_test(filename, code, journey)`: journey is required, one of `sign_in`, `wrong_password`,
+  `appointments`, `lab_results`, `download_pdf`, `diff_check` (schema enum, checked by harness and
+  tool). Only `test_[a-z0-9_]+.py`, only inside `tests/generated/`. AST checks
   before writing: syntax, imports limited to re/json/pytest/playwright.sync_api, no exec/eval/open/
   __import__/dunder access, must define a test_* function, max 20 KB. A guardrail, not a sandbox.
 - `run_tests(filename=None)`: model-facing arg is only the optional filename; `base_url` (release

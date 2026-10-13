@@ -109,7 +109,8 @@ def run_agent(real: bool, release_url: str, run_dir: Path) -> dict:
 def run_metrics(summary: dict) -> dict:
     return {key: summary[key] for key in ("stop_reason", "steps", "tool_calls", "harness_test_runs",
                                            "total_tokens", "total_cost_usd", "duration_s")} | {
-        "healed": len(summary["healed"]), "report": summary["report"]}
+        "healed": len(summary["healed"]),
+        "report": Path(summary["report"]).relative_to(REPO_ROOT).as_posix()}
 
 
 # ---------------------------------------------------------------- output

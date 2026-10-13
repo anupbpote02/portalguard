@@ -49,7 +49,7 @@ def main() -> int:
         return 2
 
     results_dir = REPO_ROOT / "runs" / datetime.now().strftime("%Y%m%d-%H%M%S") / "test-results"
-    show("write_test('test_download_pdf.py', ...)", write_test("test_download_pdf.py", SAMPLE_TEST))
+    show("write_test('test_download_pdf.py', ...)", write_test("test_download_pdf.py", SAMPLE_TEST, "download_pdf"))
     show(f"run_tests(base_url={GOOD!r})", run_tests(GOOD, "test_download_pdf.py", results_dir))
     show(f"run_tests(base_url={BUGGY!r})", run_tests(BUGGY, "test_download_pdf.py", results_dir))
 
@@ -62,7 +62,7 @@ def main() -> int:
         ("test_empty.py", "x = 1"),
     ]:
         try:
-            write_test(filename, code)
+            write_test(filename, code, "diff_check")
             print(f"  NOT REJECTED: {filename}")
         except ValueError as e:
             print(f"  rejected {filename}: {e}")

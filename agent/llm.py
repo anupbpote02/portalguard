@@ -81,6 +81,13 @@ class MockLLM:
 # ---------------------------------------------------------------- mock scenarios
 
 # Journey tests a model would write. They use conftest fixtures: page, base_url, patient, signed_in.
+TEST_JOURNEYS = {
+    "test_sign_in.py": "sign_in",
+    "test_wrong_password.py": "wrong_password",
+    "test_appointments.py": "appointments",
+    "test_lab_results.py": "lab_results",
+    "test_download_pdf.py": "download_pdf",
+}
 JOURNEY_TESTS = {
     "test_sign_in.py": '''\
 from playwright.sync_api import Page, expect
@@ -93,6 +100,9 @@ def test_sign_in_with_valid_credentials(page: Page, base_url: str, patient: dict
     page.get_by_role("button", name="Sign in").click()
     expect(page).to_have_url(base_url + "dashboard.html")
     expect(page.get_by_role("heading", name=f"Welcome, {patient['name']}")).to_be_visible()
+''',
+    "test_wrong_password.py": '''\
+from playwright.sync_api import Page, expect
 
 
 def test_wrong_password_shows_alert(page: Page, base_url: str, patient: dict):
@@ -182,12 +192,13 @@ def qe_scenario(baseline_url: str, release_url: str):
         heals_done = sum(1 for m in messages if m["role"] == "assistant" and m.get("tool_calls")
                          and m["tool_calls"][0]["function"]["name"] == "write_test") - 1
         if broken and heals_done < len(heals):
-            return [("write_test", {"filename": "test_lab_results.py", "code": heals[heals_done]})]
+            return [("write_test", {"filename": "test_lab_results.py", "code": heals[heals_done], "journey": "lab_results"})]
         return _summarize_triage(messages)
 
     yield snapshots
     yield [("compare_snapshots", {"baseline": "baseline", "new": "release"})]
-    yield [("write_test", {"filename": name, "code": code}) for name, code in first_tests.items()]
+    yield [("write_test", {"filename": name, "code": code, "journey": TEST_JOURNEYS[name]})
+           for name, code in first_tests.items()]
     yield [("run_tests", {})]
     while True:
         yield heal_or_finish
@@ -197,7 +208,7 @@ def guardrails_scenario(baseline_url: str, release_url: str) -> list:
     """A misbehaving model: bad arguments, then off-site URLs until the harness stops the run."""
     return [
         [("compare_snapshots", {"baseline": "baseline"})],                                   # missing arg
-        [("write_test", {"filename": "../conftest.py", "code": "def test_x(): pass"})],      # bad filename
+        [("write_test", {"filename": "../conftest.py", "code": "def test_x(): pass", "journey": "sign_in"})],  # bad filename
         [("run_tests", {"base_url": "https://evil.example.com/"})],                          # not the model's to set
         [("delete_everything", {})],                                                        # unknown tool
         [("snapshot_page", {"url": "https://example.com/", "label": "offsite"})],

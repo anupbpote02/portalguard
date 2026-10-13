@@ -5,24 +5,21 @@ The last good release is the oracle. For each test that fails on the release:
   2. rerun it on the release: passes now            -> flaky       (recorded, not reported)
   3. passes on baseline, fails on release 2/2 runs  -> real_bug    (if it matches a snapshot diff or a journey)
                                                     -> unconfirmed (no supporting evidence: human review)
+The journey comes from write_test's required `journey` argument, never from guessing at names.
 """
 
+import ast
 import hashlib
 import re
 
-from agent.tools import GENERATED_TESTS_DIR
+from agent.tools import GENERATED_TESTS_DIR, JOURNEYS
 
 FLAKY_RERUNS = 1          # extra release runs before a failure counts as consistent
 MAX_HEAL_ATTEMPTS = 3
 
 LOCATOR_NAME = re.compile(r'name=\\?"([^"\\]+)')
-WAITING_FOR = re.compile(r"waiting for (.+)$")
-JOURNEYS = {  # test file keyword -> journey from the QE plan
-    "sign_in": "Sign in",
-    "appointment": "See upcoming appointments",
-    "lab_result": "View lab results",
-    "download": "Download lab results PDF",
-}
+QUOTED = re.compile(r'"([^"\n]{3,})"|\'([^\'\n]{3,})\'')
+FAILING_LINE = re.compile(r"^line (\d+):")
 
 
 def split_test_id(test_id: str) -> tuple[str, str]:
@@ -31,9 +28,24 @@ def split_test_id(test_id: str) -> tuple[str, str]:
     return filename, name.split("[", 1)[0]
 
 
-def _file_hash(filename: str) -> str:
+def _functions(code: str) -> dict[str, str]:
+    """Top-level test functions -> normalized AST (ignores comments and formatting)."""
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return {}
+    return {n.name: ast.dump(n, include_attributes=False) for n in tree.body if isinstance(n, ast.FunctionDef)}
+
+
+def _read(filename: str) -> str:
     path = GENERATED_TESTS_DIR / filename
-    return hashlib.sha256(path.read_bytes()).hexdigest()[:12] if path.exists() else ""
+    return path.read_text(encoding="utf-8") if path.exists() else ""
+
+
+def _test_hash(filename: str, name: str) -> str:
+    """Hash of ONE test function, so rewriting other tests in the same file doesn't invalidate it."""
+    source = _functions(_read(filename)).get(name)
+    return hashlib.sha256(source.encode()).hexdigest()[:12] if source else ""
 
 
 class Triage:
@@ -42,6 +54,7 @@ class Triage:
         self.baseline_url = baseline_url
         self.release_url = release_url
         self.tests: dict[str, dict] = {}       # "file::name" -> record (verdict, evidence, history)
+        self.file_journeys: dict[str, str] = {}  # filename -> journey key, from write_test
         self.heal_attempts: dict[str, int] = {}
         self.snapshots: dict[str, dict] = {}   # label -> snapshot_page summary
         self.diff: dict | None = None          # last compare_snapshots result
@@ -58,12 +71,21 @@ class Triage:
     def record_diff(self, result: dict) -> None:
         self.diff = result
 
-    def before_write(self, filename: str) -> str | None:
-        """Called before write_test. Returns a refusal message, or None to allow the write."""
+    def record_write(self, filename: str, journey: str) -> None:
+        self.file_journeys[filename] = journey
+
+    def before_write(self, filename: str, code: str) -> str | None:
+        """Called before write_test. Returns a refusal message, or None to allow the write.
+
+        Tests that prove a real bug are locked per function: the new file must contain them unchanged.
+        Other tests in the same file can still be healed.
+        """
         records = [r for r in self.tests.values() if r["file"] == filename]
-        if any(r["verdict"] == "real_bug" for r in records):
-            return (f"refused: {filename} is evidence of a confirmed bug (passes on baseline, fails on "
-                    "release). Changing it would hide the bug.")
+        old_functions, new_functions = _functions(_read(filename)), _functions(code)
+        for record in records:
+            if record["verdict"] == "real_bug" and new_functions.get(record["name"]) != old_functions.get(record["name"]):
+                return (f"refused: {record['name']} in {filename} is evidence of a confirmed bug (passes on "
+                        "baseline, fails on release). Keep it unchanged; you may change the other tests.")
         if any(r["verdict"] in ("broken_test", "gave_up") for r in records):
             if self.heal_attempts.get(filename, 0) >= MAX_HEAL_ATTEMPTS:
                 return f"refused: heal limit reached for {filename} ({MAX_HEAL_ATTEMPTS} attempts)"
@@ -82,7 +104,7 @@ class Triage:
                 "test": test_id, "file": filename, "name": name, "verdict": None, "code_hash": None,
                 "heal_attempts": 0, "first_error": None, "history": [],
             })
-            code_hash = _file_hash(filename)
+            code_hash = _test_hash(filename, name)
             was_broken = record["verdict"] in ("broken_test", "gave_up")
 
             # Same code, already decided: don't spend more runs on it.
@@ -140,8 +162,8 @@ class Triage:
         # A regression: passes on the last good release, fails on this one every time.
         record["healed"] = record.get("healed") or was_broken
         record["release_runs"] = runs
-        diff_lines = self._matching_diff_lines(record["release_error"] or "")
-        journey = next((j for key, j in JOURNEYS.items() if key in filename), None)
+        diff_lines = self._matching_diff_lines(record["release_error"] or "", filename)
+        journey = JOURNEYS.get(self.file_journeys.get(filename))
         record["diff_evidence"] = diff_lines
         record["journey"] = journey
         record["category"] = "accessibility" if diff_lines else "functional"
@@ -150,9 +172,19 @@ class Triage:
         else:
             self._set(record, "unconfirmed", "regression with no matching snapshot diff or journey; needs review")
 
-    def _matching_diff_lines(self, error: str) -> list[str]:
-        """Snapshot diff lines that mention an accessible name the failing locator was looking for."""
+    def _matching_diff_lines(self, error: str, filename: str) -> list[str]:
+        """Snapshot diff lines that mention an accessible name the failing check was about.
+
+        Names come from the failure message (name="..." in the locator) and from quoted strings on the
+        test's failing line only, e.g. assert button.get_attribute("name") == "Sign in". Not from the
+        whole test: a test that signs in with the button and then fails on download isn't about BUG-1.
+        """
         names = set(LOCATOR_NAME.findall(error))
+        line_number = FAILING_LINE.match(error)
+        source_lines = _read(filename).splitlines()
+        if line_number and 0 < int(line_number[1]) <= len(source_lines):
+            failing_line = source_lines[int(line_number[1]) - 1]
+            names |= {a or b for a, b in QUOTED.findall(failing_line)}
         if not names or not self.diff:
             return []
         return [f"{where}: {line}" for where, lines in self.diff.get("changes", {}).items()
