@@ -272,4 +272,4 @@ In mock mode, write one test with a wrong selector first so healing is visible.
 6. Healing / triage loop + report.md. ✅
 7. Evals. ✅
 8. CI (GitHub Actions + Azure Pipelines). ✅
-9. README.
+9. README. ✅
