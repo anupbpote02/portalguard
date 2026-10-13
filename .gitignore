@@ -21,3 +21,7 @@ tests/generated/test_*.py
 memory/memory.json
 memory/*.tmp
 memory/baselines/
+
+# Eval output (regenerated each eval run; CI uploads it as an artifact)
+evals/results.json
+evals/results.md

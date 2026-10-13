@@ -16,7 +16,7 @@ def _cell(text) -> str:
     return _one_line(text).replace("|", "\\|")
 
 
-def _group_bugs(triage: Triage) -> list[dict]:
+def group_bugs(triage: Triage) -> list[dict]:
     """One finding per piece of evidence: tests that hit the same diff line are the same bug."""
     groups: dict[tuple, dict] = {}
     for record in triage.records("real_bug"):
@@ -27,7 +27,7 @@ def _group_bugs(triage: Triage) -> list[dict]:
     return sorted(groups.values(), key=lambda g: order.get(g["records"][0]["journey"], len(order)))
 
 
-def _bug_title(group: dict) -> str:
+def group_title(group: dict) -> str:
     if group["evidence"]:
         where, change = group["evidence"][0].split(": ", 1)
         return f"{change} ({where})"
@@ -37,7 +37,7 @@ def _bug_title(group: dict) -> str:
 
 def write_report(path: Path, summary: dict, triage: Triage, baseline_url: str, release_url: str,
                  model: str) -> Path:
-    bugs = _group_bugs(triage)
+    bugs = group_bugs(triage)
     healed = triage.healed()
     flaky = triage.records("flaky")
     unconfirmed = triage.records("unconfirmed")
@@ -78,7 +78,7 @@ def write_report(path: Path, summary: dict, triage: Triage, baseline_url: str, r
         status = (f"KNOWN (first reported in run #{known['first_reported_run']}, seen {known['times_seen'] + 1}x)"
                   if known else "NEW")
         lines += [
-            f"### {number}. [{'KNOWN' if known else 'NEW'}] {_bug_title(group)}",
+            f"### {number}. [{'KNOWN' if known else 'NEW'}] {group_title(group)}",
             "",
             f"- **Status:** {status}",
             f"- **Type:** {first['category']}" + (f"  |  **Journey:** {first['journey']}" if first["journey"] else ""),

@@ -60,13 +60,13 @@ agent/
   demo_tools.py     no-LLM helper: write one sample test, run it on good (pass) + buggy (fail)
 tests/generated/        tests written by the agent (test_*.py only, gitignored)
 tests/generated/conftest.py  human-written: patient + signed_in fixtures, localhost-only route guard, 5s timeouts
-tests/unit/             triage unit tests with a fake runner (no browser): python -m pytest tests/unit
+tests/unit/             triage, memory and eval-matching unit tests (no browser): python -m pytest tests/unit
 pytest.ini              pythonpath=., default base_url = good release
 memory/memory.json      long-term memory (gitignored runtime state; memory/baselines/ holds the
                         saved baseline snapshot; CI persists memory/ as a cache/artifact)
 runs/<timestamp>/       trace.jsonl, snapshots/, test-results/, tests/ (copy), report.md   (gitignored)
-evals/expected_bugs.json
-evals/run_eval.py
+evals/expected_bugs.json  answer key: 4 bugs, each with deterministic substring match rules
+evals/run_eval.py         python -m evals.run_eval [--real] [--repeat N]; writes results.json/.md (gitignored)
 .github/workflows/qe.yml
 azure-pipelines.yml
 requirements.txt, .env.example, README.md
@@ -165,6 +165,19 @@ After every model `run_tests` on the release, the harness triages each failing t
 - Mock qe is reactive: skips the baseline snapshot when briefed, heals only while broken_test.
   Run 1: 9 steps, ~100s, 4 new bugs, 1 healed. Run 2: 5 steps, ~54s, 4 known bugs, 0 heals.
 
+## Evals (evals/run_eval.py)
+
+- Per repeat: agent on buggy, then on good, both with memory OFF (cold, comparable runs). Calls
+  Harness directly; starts the portal on a thread if it isn't running.
+- Matching (no LLM judge): a reported bug (harness `summary["bugs"]`: title, category, journey,
+  diff_evidence, errors) matches an expected bug if any rule holds: `where` + `diff` substrings in
+  one diff line, or exact `journey` + `error` substring. First match in answer-key order wins;
+  second hit on the same bug = duplicate (not a false positive); no hit = false positive.
+- Metrics: recall, precision ((TP + duplicates) / reported), type accuracy, false alarms on good,
+  tests healed, steps, tokens, cost, duration. Mean over repeats; misses listed per run.
+- Gate: exit 1 if recall < --min-recall (1.0) or false alarms > --max-false-alarms (0); exit 2 if
+  --real has no key. Mock result: 100% recall/precision/type, 0 false alarms, 2 healed, 18 steps.
+
 ## Tools (exposed to the model)
 
 - `snapshot_page(url, label)`: signs in as the first test user and snapshots the `sign-in` and
@@ -213,6 +226,6 @@ In mock mode, write one test with a wrong selector first so healing is visible.
 4b. Harness + mock LLM + main.py. ✅
 5. Memory. ✅
 6. Healing / triage loop + report.md. ✅
-7. Evals.
+7. Evals. ✅
 8. CI (GitHub Actions + Azure Pipelines).
 9. README.

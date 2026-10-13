@@ -1,0 +1,46 @@
+{
+  "_note": "Answer key for portal/buggy. A reported bug matches an expected bug if ANY rule in 'match' holds. Rules are plain substring checks (deterministic, no LLM judge): 'diff' + 'where' against the bug's snapshot diff lines, or 'journey' + 'error' against its journey and failure messages.",
+  "release": "buggy",
+  "bugs": [
+    {
+      "id": "BUG-1",
+      "title": "\"Sign in\" button has no accessible name (icon only)",
+      "type": "accessibility",
+      "file": "index.html",
+      "match": [
+        {"where": "sign-in / main", "diff": "button \"Sign in\""},
+        {"journey": "Sign in", "error": "name=\"Sign in\""}
+      ]
+    },
+    {
+      "id": "BUG-2",
+      "title": "\"Upcoming appointments\" heading removed",
+      "type": "accessibility",
+      "file": "dashboard.html",
+      "match": [
+        {"where": "dashboard / main", "diff": "heading \"Upcoming appointments\""},
+        {"journey": "See upcoming appointments", "error": "name=\"Upcoming appointments\""}
+      ]
+    },
+    {
+      "id": "BUG-3",
+      "title": "\"Lab results\" heading removed (inside the iframe)",
+      "type": "accessibility",
+      "file": "lab-results.html",
+      "match": [
+        {"where": "lab-results-frame", "diff": "heading \"Lab results\""},
+        {"journey": "View lab results", "error": "name=\"Lab results\""}
+      ]
+    },
+    {
+      "id": "BUG-4",
+      "title": "\"Download PDF\" does nothing (no file, no message)",
+      "type": "functional",
+      "file": "lab-results.html",
+      "match": [
+        {"journey": "Download lab results PDF", "error": "event \"download\""},
+        {"journey": "Download lab results PDF", "error": "Download started"}
+      ]
+    }
+  ]
+}

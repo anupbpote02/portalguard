@@ -17,7 +17,7 @@ from pathlib import Path
 
 from agent import tools
 from agent.memory import Memory
-from agent.report import write_report
+from agent.report import group_bugs, group_title, write_report
 from agent.triage import Triage
 
 MAX_STEPS = 25            # LLM calls per run
@@ -368,6 +368,16 @@ class Harness:
             record["known"] = self.memory.known_bug(record)
         summary["new_bugs"] = sum(1 for r in self.triage.records("real_bug") if not r["known"])
         summary["known_bugs"] = sum(1 for r in self.triage.records("real_bug") if r["known"])
+        # Structured bug list (one entry per piece of evidence, same grouping as report.md), for evals.
+        summary["bugs"] = [{
+            "title": group_title(group),
+            "category": group["records"][0]["category"],
+            "journey": group["records"][0]["journey"],
+            "diff_evidence": group["evidence"],
+            "tests": [r["test"] for r in group["records"]],
+            "errors": [r["release_error"] for r in group["records"]],
+            "known": bool(group["records"][0]["known"]),
+        } for group in group_bugs(self.triage)]
         summary["memory"] = {
             "enabled": self.memory.enabled,
             "run_number": self.memory.run_count + 1,
