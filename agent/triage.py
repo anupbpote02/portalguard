@@ -213,12 +213,12 @@ class Triage:
         return out
 
     def _baseline_hints(self) -> dict:
-        """Frame ids and accessible names in the baseline, so the model can pick real locators."""
+        """Frame ids and accessible names (headings, buttons, textboxes, links) in the baseline."""
         label = (self.diff or {}).get("baseline")
         summary = self.snapshots.get(label) if label else None
         if not summary:
             return {}
-        return {f"{page} / {frame}": {k: v for k, v in info.items() if k in ("headings", "buttons")}
+        return {f"{page} / {frame}": {k: v for k, v in info.items() if k != "nodes" and v}
                 for page, frames in summary["pages"].items() for frame, info in frames.items()}
 
     # ------------------------------------------------------------ for the report

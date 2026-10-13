@@ -36,6 +36,14 @@ class OpenAILLM:
         self.model = model
         self.max_completion_tokens = max_completion_tokens
 
+    @staticmethod
+    def is_retryable(error: Exception) -> bool:
+        """Transient API problems the harness should retry (the SDK's own 2 retries already failed)."""
+        import openai
+
+        return isinstance(error, (openai.APIConnectionError, openai.APITimeoutError,
+                                  openai.RateLimitError, openai.InternalServerError))
+
     def complete(self, messages: list[dict], tools: list[dict]) -> LLMReply:
         response = self.client.chat.completions.create(
             model=self.model,

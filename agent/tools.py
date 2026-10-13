@@ -106,18 +106,18 @@ def _snapshot_all_frames(page) -> dict[str, str]:
     return frames
 
 
+SUMMARY_ROLES = {"heading": "headings", "button": "buttons", "textbox": "textboxes", "link": "links"}
+
+
 def _summarize_frame(aria: str) -> dict:
-    headings, buttons = [], []
+    """Accessible names per role: what a test can use with get_by_role(...) / get_by_label(...)."""
+    summary = {"nodes": len(aria.splitlines()), **{key: [] for key in SUMMARY_ROLES.values()}}
     for line in aria.splitlines():
         match = ARIA_LINE.match(line)
-        if not match:
-            continue
-        name = match["name"] if match["name"] is not None else "(no name)"
-        if match["role"] == "heading":
-            headings.append(name)
-        elif match["role"] == "button":
-            buttons.append(name)
-    return {"nodes": len(aria.splitlines()), "headings": headings, "buttons": buttons}
+        if match and match["role"] in SUMMARY_ROLES:
+            name = match["name"] if match["name"] is not None else "(no name)"
+            summary[SUMMARY_ROLES[match["role"]]].append(name)
+    return summary
 
 
 def _resolve_snapshot(label_or_path: str, snapshot_dir: Path) -> Path:

@@ -124,6 +124,15 @@ def write_report(path: Path, summary: dict, triage: Triage, baseline_url: str, r
                   for r in unconfirmed + gave_up]
         lines.append("")
 
+    coverage = summary.get("coverage") or {}
+    lines += ["## Journey coverage", ""]
+    lines += [f"- Covered: {', '.join(coverage.get('covered', [])) or 'none'}",
+              f"- Missing: {', '.join(coverage.get('missing', [])) or 'none'}"
+              + (" (the run ended without a test for these, so bugs there could be missed)"
+                 if coverage.get("missing") else ""),
+              f"- Coverage reminders sent to the model: {coverage.get('nudges', 0)}; "
+              f"LLM API retries: {summary.get('llm_retries', 0)}", ""]
+
     memory = summary.get("memory") or {}
     lines += ["## Memory", ""]
     if memory.get("enabled"):

@@ -52,6 +52,7 @@ agent/
   harness.py   loop, budgets, allowlist, arg validation, trace log, tool schemas, system prompt
   llm.py       OpenAILLM (gpt-4.1-mini) + MockLLM and mock scenarios (qe, guardrails, runaway)
   triage.py    deterministic verdicts per failing test (baseline = oracle), heal limits
+  coverage.py  static per-journey rules: does a test exercise its journey (not just visibility)
   report.py    runs/<id>/report.md from harness state, never from model text
   tools.py     snapshot_page, compare_snapshots, write_test, run_tests
   memory.py    long-term memory/memory.json: baseline, selectors, selector fixes, known bugs, flaky
@@ -126,6 +127,17 @@ files carry no "BUG" comments, so they look like a real release.
 - Each run clears tests/generated/test_*.py first and copies the written tests into the run folder.
 - Exit codes: 0 done, 1 llm_error / missing key, 2 portal not reachable, 3 budget or policy stop.
 - Prices: gpt-4.1-mini $0.40 in / $1.60 out per 1M tokens (verify); mock is $0 with ~4 chars/token.
+- Coverage (agent/coverage.py): JOURNEY_RULES per journey, regex on each test function's source;
+  a file passes if one test does all steps. sign_in/wrong_password: fill + click/press (+ expect /
+  "alert"); appointments: to_have_count/to_have_text/to_contain_text; lab_results: frame_locator +
+  same; download_pdf: expect_download + click + suggested_filename. write_test rejects a journey file
+  that fails (status refused, missing steps listed). A final answer with required journeys missing
+  gets a `coverage_nudge` user message (MAX_COVERAGE_NUDGES=2), then is accepted; report.md has a
+  Journey coverage section (covered / missing / nudges / retries).
+- LLM retries: OpenAILLM.is_retryable (connection, timeout, rate limit, 5xx) -> up to LLM_RETRIES=3
+  with 2/4/8s backoff; `llm_retry` trace events; retries don't count as steps.
+- Snapshot summaries list headings, buttons, textboxes and links; triage's baseline_has includes
+  them, so heals use real labels ("Email", not a guessed "Email address").
 
 ## Triage + healing (agent/triage.py)
 

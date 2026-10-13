@@ -1,0 +1,351 @@
+{
+  "mode": "real",
+  "repeats": 5,
+  "started_at": "2026-10-13T12:15:21",
+  "memory": "off",
+  "expected": [
+    {
+      "id": "BUG-1",
+      "title": "\"Sign in\" button has no accessible name (icon only)",
+      "type": "accessibility"
+    },
+    {
+      "id": "BUG-2",
+      "title": "\"Upcoming appointments\" heading removed",
+      "type": "accessibility"
+    },
+    {
+      "id": "BUG-3",
+      "title": "\"Lab results\" heading removed (inside the iframe)",
+      "type": "accessibility"
+    },
+    {
+      "id": "BUG-4",
+      "title": "\"Download PDF\" does nothing (no file, no message)",
+      "type": "functional"
+    }
+  ],
+  "totals": {
+    "recall": 0.95,
+    "precision": 1.0,
+    "type_accuracy": 1.0,
+    "false_alarms_on_good": 0,
+    "tests_healed": 14,
+    "steps": 175,
+    "tokens": 758498,
+    "cost_usd": 0.339868,
+    "duration_s": 1408.5
+  },
+  "gate": {
+    "min_recall": 1.0,
+    "max_false_alarms": 0,
+    "passed": false
+  },
+  "runs": [
+    {
+      "repeat": 1,
+      "buggy": {
+        "run": {
+          "stop_reason": "done",
+          "steps": 16,
+          "tool_calls": 16,
+          "harness_test_runs": 17,
+          "total_tokens": 54324,
+          "total_cost_usd": 0.02444,
+          "duration_s": 178.7,
+          "healed": 1,
+          "report": "runs/eval-20261013-121521-r1-buggy/report.md"
+        },
+        "bugs_reported": 4,
+        "bug_titles": [
+          "REMOVED: heading \"Upcoming appointments\" [level=2] (dashboard / main)",
+          "Download lab results PDF journey broken (test_download_pdf.py::test_download_pdf)",
+          "CHANGED: button \"Sign in\"  ->  button (no accessible name) (sign-in / main)",
+          "REMOVED: heading \"Lab results\" [level=1] (dashboard / lab-results-frame)"
+        ],
+        "match": {
+          "found": {
+            "BUG-2": "REMOVED: heading \"Upcoming appointments\" [level=2] (dashboard / main)",
+            "BUG-4": "Download lab results PDF journey broken (test_download_pdf.py::test_download_pdf)",
+            "BUG-1": "CHANGED: button \"Sign in\"  ->  button (no accessible name) (sign-in / main)",
+            "BUG-3": "REMOVED: heading \"Lab results\" [level=1] (dashboard / lab-results-frame)"
+          },
+          "missed": [],
+          "duplicates": [],
+          "false_positives": [],
+          "recall": 1.0,
+          "precision": 1.0,
+          "type_accuracy": 1.0
+        }
+      },
+      "good": {
+        "run": {
+          "stop_reason": "done",
+          "steps": 20,
+          "tool_calls": 28,
+          "harness_test_runs": 7,
+          "total_tokens": 114014,
+          "total_cost_usd": 0.050416,
+          "duration_s": 135.8,
+          "healed": 3,
+          "report": "runs/eval-20261013-121521-r1-good/report.md"
+        },
+        "bugs_reported": 0,
+        "bug_titles": [],
+        "match": {
+          "found": {},
+          "missed": [],
+          "duplicates": [],
+          "false_positives": [],
+          "recall": 1.0,
+          "precision": 1.0,
+          "type_accuracy": null
+        }
+      }
+    },
+    {
+      "repeat": 2,
+      "buggy": {
+        "run": {
+          "stop_reason": "done",
+          "steps": 17,
+          "tool_calls": 17,
+          "harness_test_runs": 18,
+          "total_tokens": 58529,
+          "total_cost_usd": 0.025719,
+          "duration_s": 187.8,
+          "healed": 2,
+          "report": "runs/eval-20261013-121521-r2-buggy/report.md"
+        },
+        "bugs_reported": 4,
+        "bug_titles": [
+          "REMOVED: heading \"Upcoming appointments\" [level=2] (dashboard / main)",
+          "Download lab results PDF journey broken (test_download_pdf.py::test_download_pdf)",
+          "CHANGED: button \"Sign in\"  ->  button (no accessible name) (sign-in / main)",
+          "REMOVED: heading \"Lab results\" [level=1] (dashboard / lab-results-frame)"
+        ],
+        "match": {
+          "found": {
+            "BUG-2": "REMOVED: heading \"Upcoming appointments\" [level=2] (dashboard / main)",
+            "BUG-4": "Download lab results PDF journey broken (test_download_pdf.py::test_download_pdf)",
+            "BUG-1": "CHANGED: button \"Sign in\"  ->  button (no accessible name) (sign-in / main)",
+            "BUG-3": "REMOVED: heading \"Lab results\" [level=1] (dashboard / lab-results-frame)"
+          },
+          "missed": [],
+          "duplicates": [],
+          "false_positives": [],
+          "recall": 1.0,
+          "precision": 1.0,
+          "type_accuracy": 1.0
+        }
+      },
+      "good": {
+        "run": {
+          "stop_reason": "done",
+          "steps": 20,
+          "tool_calls": 25,
+          "harness_test_runs": 5,
+          "total_tokens": 96744,
+          "total_cost_usd": 0.043145,
+          "duration_s": 126.0,
+          "healed": 1,
+          "report": "runs/eval-20261013-121521-r2-good/report.md"
+        },
+        "bugs_reported": 0,
+        "bug_titles": [],
+        "match": {
+          "found": {},
+          "missed": [],
+          "duplicates": [],
+          "false_positives": [],
+          "recall": 1.0,
+          "precision": 1.0,
+          "type_accuracy": null
+        }
+      }
+    },
+    {
+      "repeat": 3,
+      "buggy": {
+        "run": {
+          "stop_reason": "done",
+          "steps": 11,
+          "tool_calls": 15,
+          "harness_test_runs": 11,
+          "total_tokens": 36965,
+          "total_cost_usd": 0.016909,
+          "duration_s": 133.6,
+          "healed": 1,
+          "report": "runs/eval-20261013-121521-r3-buggy/report.md"
+        },
+        "bugs_reported": 3,
+        "bug_titles": [
+          "CHANGED: button \"Sign in\"  ->  button (no accessible name) (sign-in / main)",
+          "REMOVED: heading \"Upcoming appointments\" [level=2] (dashboard / main)",
+          "Download lab results PDF journey broken (test_download_pdf.py::test_download_pdf)"
+        ],
+        "match": {
+          "found": {
+            "BUG-1": "CHANGED: button \"Sign in\"  ->  button (no accessible name) (sign-in / main)",
+            "BUG-2": "REMOVED: heading \"Upcoming appointments\" [level=2] (dashboard / main)",
+            "BUG-4": "Download lab results PDF journey broken (test_download_pdf.py::test_download_pdf)"
+          },
+          "missed": [
+            "BUG-3"
+          ],
+          "duplicates": [],
+          "false_positives": [],
+          "recall": 0.75,
+          "precision": 1.0,
+          "type_accuracy": 1.0
+        }
+      },
+      "good": {
+        "run": {
+          "stop_reason": "done",
+          "steps": 9,
+          "tool_calls": 14,
+          "harness_test_runs": 2,
+          "total_tokens": 25671,
+          "total_cost_usd": 0.012182,
+          "duration_s": 63.6,
+          "healed": 2,
+          "report": "runs/eval-20261013-121521-r3-good/report.md"
+        },
+        "bugs_reported": 0,
+        "bug_titles": [],
+        "match": {
+          "found": {},
+          "missed": [],
+          "duplicates": [],
+          "false_positives": [],
+          "recall": 1.0,
+          "precision": 1.0,
+          "type_accuracy": null
+        }
+      }
+    },
+    {
+      "repeat": 4,
+      "buggy": {
+        "run": {
+          "stop_reason": "done",
+          "steps": 16,
+          "tool_calls": 16,
+          "harness_test_runs": 13,
+          "total_tokens": 55466,
+          "total_cost_usd": 0.025789,
+          "duration_s": 134.5,
+          "healed": 0,
+          "report": "runs/eval-20261013-121521-r4-buggy/report.md"
+        },
+        "bugs_reported": 4,
+        "bug_titles": [
+          "REMOVED: heading \"Upcoming appointments\" [level=2] (dashboard / main)",
+          "Download lab results PDF journey broken (test_download_pdf.py::test_download_pdf)",
+          "CHANGED: button \"Sign in\"  ->  button (no accessible name) (sign-in / main)",
+          "REMOVED: heading \"Lab results\" [level=1] (dashboard / lab-results-frame)"
+        ],
+        "match": {
+          "found": {
+            "BUG-2": "REMOVED: heading \"Upcoming appointments\" [level=2] (dashboard / main)",
+            "BUG-4": "Download lab results PDF journey broken (test_download_pdf.py::test_download_pdf)",
+            "BUG-1": "CHANGED: button \"Sign in\"  ->  button (no accessible name) (sign-in / main)",
+            "BUG-3": "REMOVED: heading \"Lab results\" [level=1] (dashboard / lab-results-frame)"
+          },
+          "missed": [],
+          "duplicates": [],
+          "false_positives": [],
+          "recall": 1.0,
+          "precision": 1.0,
+          "type_accuracy": 1.0
+        }
+      },
+      "good": {
+        "run": {
+          "stop_reason": "done",
+          "steps": 21,
+          "tool_calls": 21,
+          "harness_test_runs": 7,
+          "total_tokens": 84119,
+          "total_cost_usd": 0.036607,
+          "duration_s": 122.3,
+          "healed": 1,
+          "report": "runs/eval-20261013-121521-r4-good/report.md"
+        },
+        "bugs_reported": 0,
+        "bug_titles": [],
+        "match": {
+          "found": {},
+          "missed": [],
+          "duplicates": [],
+          "false_positives": [],
+          "recall": 1.0,
+          "precision": 1.0,
+          "type_accuracy": null
+        }
+      }
+    },
+    {
+      "repeat": 5,
+      "buggy": {
+        "run": {
+          "stop_reason": "max_steps",
+          "steps": 25,
+          "tool_calls": 25,
+          "harness_test_runs": 13,
+          "total_tokens": 128631,
+          "total_cost_usd": 0.058456,
+          "duration_s": 184.1,
+          "healed": 1,
+          "report": "runs/eval-20261013-121521-r5-buggy/report.md"
+        },
+        "bugs_reported": 4,
+        "bug_titles": [
+          "Download lab results PDF journey broken (test_download_pdf.py::test_download_pdf)",
+          "CHANGED: button \"Sign in\"  ->  button (no accessible name) (sign-in / main)",
+          "REMOVED: heading \"Upcoming appointments\" [level=2] (dashboard / main)",
+          "REMOVED: heading \"Lab results\" [level=1] (dashboard / lab-results-frame)"
+        ],
+        "match": {
+          "found": {
+            "BUG-4": "Download lab results PDF journey broken (test_download_pdf.py::test_download_pdf)",
+            "BUG-1": "CHANGED: button \"Sign in\"  ->  button (no accessible name) (sign-in / main)",
+            "BUG-2": "REMOVED: heading \"Upcoming appointments\" [level=2] (dashboard / main)",
+            "BUG-3": "REMOVED: heading \"Lab results\" [level=1] (dashboard / lab-results-frame)"
+          },
+          "missed": [],
+          "duplicates": [],
+          "false_positives": [],
+          "recall": 1.0,
+          "precision": 1.0,
+          "type_accuracy": 1.0
+        }
+      },
+      "good": {
+        "run": {
+          "stop_reason": "done",
+          "steps": 20,
+          "tool_calls": 26,
+          "harness_test_runs": 6,
+          "total_tokens": 104035,
+          "total_cost_usd": 0.046205,
+          "duration_s": 142.1,
+          "healed": 2,
+          "report": "runs/eval-20261013-121521-r5-good/report.md"
+        },
+        "bugs_reported": 0,
+        "bug_titles": [],
+        "match": {
+          "found": {},
+          "missed": [],
+          "duplicates": [],
+          "false_positives": [],
+          "recall": 1.0,
+          "precision": 1.0,
+          "type_accuracy": null
+        }
+      }
+    }
+  ]
+}

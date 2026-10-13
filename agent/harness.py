@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from agent import tools
+from agent.coverage import check_journey, missing_journeys
 from agent.memory import Memory
 from agent.report import group_bugs, group_title, write_report
 from agent.triage import Triage
@@ -25,6 +26,9 @@ MAX_TOKENS = 150_000      # prompt + completion, summed over all calls
 MAX_COST_USD = 0.25
 MAX_BLOCKED_CALLS = 3     # off-allowlist URLs before the run is stopped as a policy violation
 MAX_TOOL_RESULT_CHARS = 6_000
+MAX_COVERAGE_NUDGES = 2   # times the harness sends the model back for missing journeys before accepting
+LLM_RETRIES = 3           # extra tries for transient API errors (connection, timeout, rate limit, 5xx)
+LLM_RETRY_BACKOFF_S = 2   # 2s, 4s, 8s
 
 # USD per 1M tokens (input, output). Check current OpenAI pricing before relying on these.
 PRICES_PER_1M = {"gpt-4.1-mini": (0.40, 1.60), "mock": (0.0, 0.0)}
@@ -55,7 +59,15 @@ expect(page).to_have_url(...). Never assert locator.is_visible(): it does not wa
 The sign-in page is base_url + "index.html".
 Use page.frame_locator("#lab-results-frame") for the lab results. Check downloads with
 page.expect_download() and suggested_filename == f"lab-results-{patient['mrn']}.pdf".
-Use signed_in unless the test is about signing in, so each test fails for one reason only."""
+Use signed_in unless the test is about signing in, so each test fails for one reason only.
+Pass name as a keyword: get_by_role("button", name="Sign in"), never get_by_role("button", "Sign in").
+Take labels, headings and button names from the snapshot summary (textboxes, headings, buttons, links);
+don't guess them.
+Each journey test must exercise the journey, not just check that something is visible: sign in and
+wrong_password fill in and submit the form; appointments and lab_results check the items themselves
+(to_have_count / to_have_text); download_pdf clicks, waits with expect_download() and checks
+suggested_filename. write_test rejects journey files that don't, and you are not done until all five
+journeys have a test."""
 
 TOOL_SCHEMAS = [
     {"type": "function", "function": {
@@ -158,6 +170,9 @@ class Harness:
         self.fresh_baseline = None                     # (snapshot file, summary) taken this run
         self.code_versions: dict[str, list[str]] = {}  # filename -> every version written this run
         self.memory_fixes: list[str] = []
+        self.coverage_nudges = 0
+        self.llm_retries = 0
+        self.sleep = time.sleep  # replaced in unit tests
 
     def _is_baseline(self, url: str) -> bool:
         return tools.release_base(url) == tools.release_base(self.baseline_url)
@@ -217,7 +232,8 @@ class Harness:
             # Locators that failed on the baseline in an earlier run are swapped for the ones that fixed them.
             # Triage still checks the result against the baseline, so a bad memory can't sneak through.
             args["code"], fixes = self.memory.apply_selector_fixes(args["code"])
-            refusal = self.triage.before_write(args["filename"], args["code"])
+            refusal = check_journey(args["code"], args["journey"]) or \
+                self.triage.before_write(args["filename"], args["code"])
             if refusal:
                 return "refused", {"error": refusal}
             self.memory_fixes += [f"{args['filename']}: {fix}" for fix in fixes]
@@ -258,6 +274,21 @@ class Harness:
         elif call.name == "run_tests":
             result["triage"] = self.triage.process(result)
         return "ok", result
+
+    def _complete_with_retries(self, messages: list[dict], trace: Trace):
+        """One LLM step. Transient API errors are retried with backoff and don't count as extra steps."""
+        retryable = getattr(self.llm, "is_retryable", lambda error: False)
+        for attempt in range(LLM_RETRIES + 1):
+            try:
+                return self.llm.complete(messages, TOOL_SCHEMAS)
+            except Exception as e:
+                if attempt == LLM_RETRIES or not retryable(e):
+                    raise
+                wait = LLM_RETRY_BACKOFF_S * 2 ** attempt
+                self.llm_retries += 1
+                trace.write("llm_retry", step=self.steps, attempt=attempt + 1, wait_s=wait,
+                            error=f"{type(e).__name__}: {e}")
+                self.sleep(wait)
 
     def _baseline_from_memory(self, label: str) -> dict:
         """Serve the saved baseline snapshot instead of opening a browser."""
@@ -316,7 +347,7 @@ class Harness:
 
             self.steps += 1
             try:
-                reply = self.llm.complete(messages, TOOL_SCHEMAS)
+                reply = self._complete_with_retries(messages, trace)
             except Exception as e:
                 stop_reason = "llm_error"
                 trace.write("llm_error", step=self.steps, error=f"{type(e).__name__}: {e}")
@@ -334,6 +365,15 @@ class Harness:
                                    for c in reply.tool_calls]} if reply.tool_calls else {}),
             })
             if not reply.tool_calls:
+                # The harness decides when the run is done: every required journey needs a test first.
+                missing = missing_journeys(self.triage.file_journeys)
+                if missing and self.coverage_nudges < MAX_COVERAGE_NUDGES:
+                    self.coverage_nudges += 1
+                    nudge = (f"Not done yet: no accepted test for journey(s) {', '.join(missing)}. Write a test "
+                             "that exercises each one with write_test, run_tests, then summarize.")
+                    messages.append({"role": "user", "content": nudge})
+                    trace.write("coverage_nudge", step=self.steps, missing=missing, nudge=self.coverage_nudges)
+                    continue
                 stop_reason, final_message = "done", reply.content
                 break
 
@@ -390,6 +430,10 @@ class Harness:
             "errors": [r["release_error"] for r in group["records"]],
             "known": bool(group["records"][0]["known"]),
         } for group in group_bugs(self.triage)]
+        summary["coverage"] = {"covered": sorted(set(self.triage.file_journeys.values()) - {"diff_check"}),
+                               "missing": missing_journeys(self.triage.file_journeys),
+                               "nudges": self.coverage_nudges}
+        summary["llm_retries"] = self.llm_retries
         summary["memory"] = {
             "enabled": self.memory.enabled,
             "run_number": self.memory.run_count + 1,
