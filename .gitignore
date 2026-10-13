@@ -28,3 +28,6 @@ evals/results.md
 
 # CI reports (JUnit)
 reports/
+
+# Local Claude Code settings
+.claude/

@@ -1,6 +1,6 @@
 # First real eval: gpt-4.1-mini, before harness fixes
 
-Run: 2026-10-13, `python -m evals.run_eval --real` (1 repeat, memory off). Commit `00bb237`.
+Run: 2026-10-13, `python -m evals.run_eval --real` (1 repeat, memory off). Commit `1f50f92`.
 Files here: `results.json` / `results.md` (eval output), `report-buggy.md` (agent report on the buggy
 release), `agent-tests/` (the tests gpt-4.1-mini wrote).
 
