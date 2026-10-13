@@ -1,0 +1,118 @@
+# PortalGuard QE for Azure DevOps: unit tests + mock eval gate on every push / PR ($0, no API key).
+# The real gpt-4.1-mini eval only runs on a manual run with "Run real eval" ticked, and needs a
+# secret pipeline variable OPENAI_API_KEY (Pipelines -> Edit -> Variables -> Keep this value secret).
+# In production this would point at Azure OpenAI under the hospital's HIPAA BAA instead.
+
+trigger:
+  branches:
+    include: ["*"]
+
+pr:
+  branches:
+    include: ["*"]
+
+parameters:
+  - name: runRealEval
+    displayName: "Run real eval with gpt-4.1-mini (--real --repeat 1, ~$0.07)"
+    type: boolean
+    default: false
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  PIP_CACHE_DIR: $(Pipeline.Workspace)/.pip
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  - job: qe
+    displayName: PortalGuard QE
+    timeoutInMinutes: 30
+    steps:
+      - checkout: self
+
+      - task: UsePythonVersion@0
+        inputs:
+          versionSpec: "3.12"
+        displayName: Use Python 3.12
+
+      - task: Cache@2
+        inputs:
+          key: 'pip | "$(Agent.OS)" | requirements.txt'
+          restoreKeys: |
+            pip | "$(Agent.OS)"
+          path: $(PIP_CACHE_DIR)
+        displayName: Cache pip
+
+      - script: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          python -m playwright install --with-deps chromium
+        displayName: Install dependencies
+
+      # The eval also starts the portal itself if it isn't reachable, so it still works if the agent
+      # cleans up background processes between steps.
+      - script: |
+          nohup python -m http.server 8000 --directory portal > portal.log 2>&1 &
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8000/good/ > /dev/null; then echo "portal is up"; exit 0; fi
+            sleep 1
+          done
+          echo "portal did not start"; cat portal.log; exit 1
+        displayName: Start portal and wait until it responds
+
+      # Not test-results/: pytest-playwright empties that folder at the start of every pytest run,
+      # and the eval runs pytest many times.
+      - script: |
+          mkdir -p reports
+          python -m pytest tests/unit -q -p no:cacheprovider --junitxml=reports/unit-tests.xml
+        displayName: Unit tests
+
+      - task: PublishTestResults@2
+        condition: always()
+        inputs:
+          testResultsFormat: JUnit
+          testResultsFiles: reports/*.xml
+          testRunTitle: PortalGuard unit tests
+        displayName: Publish unit test results
+
+      - script: python -m evals.run_eval --mock
+        displayName: Mock eval (gate)
+
+      - script: |
+          mkdir -p eval-output/mock
+          cp evals/results.json evals/results.md eval-output/mock/ 2>/dev/null || echo "no mock eval output"
+          echo "##vso[task.uploadsummary]$(System.DefaultWorkingDirectory)/eval-output/mock/results.md"
+        condition: always()
+        displayName: Keep mock eval output + summary
+
+      - ${{ if eq(parameters.runRealEval, true) }}:
+          - script: |
+              python -m evals.run_eval --real --repeat 1
+              mkdir -p eval-output/real
+              cp evals/results.json evals/results.md eval-output/real/
+              echo "##vso[task.uploadsummary]$(System.DefaultWorkingDirectory)/eval-output/real/results.md"
+            displayName: Real eval (manual runs only)
+            condition: and(succeededOrFailed(), eq(variables['Build.Reason'], 'Manual'))
+            continueOnError: true  # the real model varies run to run; report it, don't block on it
+            env:
+              OPENAI_API_KEY: $(OPENAI_API_KEY)  # secret variables are only visible when mapped explicitly
+
+      - script: |
+          out="$(Build.ArtifactStagingDirectory)/portalguard"
+          mkdir -p "$out/evals"
+          for item in runs eval-output reports portal.log; do
+            [ -e "$item" ] && cp -r "$item" "$out/"
+          done
+          cp evals/results.* "$out/evals/" 2>/dev/null || true
+          ls -R "$out" | head -50
+        condition: always()
+        displayName: Stage artifacts
+
+      - task: PublishPipelineArtifact@1
+        condition: always()
+        inputs:
+          targetPath: $(Build.ArtifactStagingDirectory)/portalguard
+          artifact: portalguard-qe-$(Build.BuildId)
+          publishLocation: pipeline
+        displayName: Publish eval output and runs

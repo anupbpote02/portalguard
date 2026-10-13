@@ -25,3 +25,6 @@ memory/baselines/
 # Eval output (regenerated each eval run; CI uploads it as an artifact)
 evals/results.json
 evals/results.md
+
+# CI reports (JUnit)
+reports/

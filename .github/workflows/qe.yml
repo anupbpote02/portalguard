@@ -1,0 +1,105 @@
+# PortalGuard QE: unit tests + mock eval gate on every push / PR ($0, no API key).
+# The real gpt-4.1-mini eval only runs when started by hand (Actions tab -> Run workflow).
+name: PortalGuard QE
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      real_eval:
+        description: "Also run the real eval with gpt-4.1-mini (--real --repeat 1, ~$0.07, uses secrets.OPENAI_API_KEY)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qe-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  qe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          python -m playwright install --with-deps chromium
+
+      - name: Start portal and wait until it responds
+        run: |
+          nohup python -m http.server 8000 --directory portal > portal.log 2>&1 &
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8000/good/ > /dev/null; then echo "portal is up"; exit 0; fi
+            sleep 1
+          done
+          echo "portal did not start"; cat portal.log; exit 1
+
+      # Not test-results/: pytest-playwright empties that folder at the start of every pytest run,
+      # and the eval runs pytest many times.
+      - name: Unit tests
+        run: |
+          mkdir -p reports
+          python -m pytest tests/unit -q -p no:cacheprovider --junitxml=reports/unit-tests.xml
+
+      - name: Mock eval (gate)
+        id: mock_eval
+        run: python -m evals.run_eval --mock
+
+      - name: Keep mock eval output
+        if: always()
+        run: |
+          mkdir -p eval-output/mock
+          cp evals/results.json evals/results.md eval-output/mock/ 2>/dev/null || echo "no mock eval output"
+
+      - name: Real eval (manual runs only)
+        id: real_eval
+        if: github.event_name == 'workflow_dispatch' && inputs.real_eval
+        continue-on-error: true  # the real model varies run to run; report it, don't block on it
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          python -m evals.run_eval --real --repeat 1
+          mkdir -p eval-output/real
+          cp evals/results.json evals/results.md eval-output/real/
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "## PortalGuard mock eval (gate: ${{ steps.mock_eval.outcome }})"
+            cat eval-output/mock/results.md 2>/dev/null || echo "Mock eval produced no results."
+            if [ -f eval-output/real/results.md ]; then
+              echo ""
+              echo "## PortalGuard real eval, gpt-4.1-mini (${{ steps.real_eval.outcome }}, not a gate)"
+              cat eval-output/real/results.md
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: portalguard-qe-${{ github.run_number }}
+          path: |
+            runs/
+            eval-output/
+            evals/results.*
+            reports/
+            portal.log
+          if-no-files-found: warn
+          retention-days: 14

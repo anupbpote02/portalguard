@@ -61,7 +61,7 @@ agent/
   demo_tools.py     no-LLM helper: write one sample test, run it on good (pass) + buggy (fail)
 tests/generated/        tests written by the agent (test_*.py only, gitignored)
 tests/generated/conftest.py  human-written: patient + signed_in fixtures, localhost-only route guard, 5s timeouts
-tests/unit/             triage, memory and eval-matching unit tests (no browser): python -m pytest tests/unit
+tests/unit/             triage, memory, coverage, retry and eval-matching unit tests (no browser)
 pytest.ini              pythonpath=., default base_url = good release
 memory/memory.json      long-term memory (gitignored runtime state; memory/baselines/ holds the
                         saved baseline snapshot; CI persists memory/ as a cache/artifact)
@@ -202,6 +202,24 @@ After every model `run_tests` on the release, the harness triages each failing t
     (all first-draft tests used positional `name`; sign-in heals guessed "Email address" because
     baseline_has lists only headings/buttons, not textbox labels).
 
+## CI (.github/workflows/qe.yml, azure-pipelines.yml)
+
+- Same steps in both, ubuntu-latest: Python 3.12 + pip cache -> pip install -> `playwright install
+  --with-deps chromium` -> start portal (nohup http.server, curl wait loop) -> unit tests with
+  `--junitxml=reports/unit-tests.xml` -> mock eval as the gate (exit 1 fails the job) -> copy
+  evals/results.* to eval-output/mock/ -> job summary (GitHub: $GITHUB_STEP_SUMMARY; Azure:
+  ##vso[task.uploadsummary]) -> artifacts (runs/, eval-output/, evals/results.*, reports/,
+  portal.log) even on failure. Azure also publishes reports/*.xml with PublishTestResults@2.
+- JUnit goes to reports/, NOT test-results/: pytest-playwright empties test-results/ at the start of
+  every pytest session, and the eval runs pytest many times (found by a clean-clone CI dry run).
+- Real eval: GitHub only on workflow_dispatch with input real_eval=true, env from
+  secrets.OPENAI_API_KEY; Azure only when parameter runRealEval=true (template-if) AND
+  Build.Reason == Manual, env OPENAI_API_KEY: $(OPENAI_API_KEY) (secret variable, mapped
+  explicitly). continue-on-error: reported, never a gate. Never runs on push/PR.
+- Nothing depends on Windows or a local .env: paths via pathlib/sys.executable, .env only read by
+  load_dotenv() in live/--real mode (missing file is ignored), memory off in evals. Locally, cloning
+  needs `git -c core.longpaths=true` if the target path is long (Windows MAX_PATH).
+
 ## Tools (exposed to the model)
 
 - `snapshot_page(url, label)`: signs in as the first test user and snapshots the `sign-in` and
@@ -253,5 +271,5 @@ In mock mode, write one test with a wrong selector first so healing is visible.
 5. Memory. ✅
 6. Healing / triage loop + report.md. ✅
 7. Evals. ✅
-8. CI (GitHub Actions + Azure Pipelines).
+8. CI (GitHub Actions + Azure Pipelines). ✅
 9. README.
