@@ -54,7 +54,7 @@ agent/
   triage.py    deterministic verdicts per failing test (baseline = oracle), heal limits
   report.py    runs/<id>/report.md from harness state, never from model text
   tools.py     snapshot_page, compare_snapshots, write_test, run_tests
-  memory.py    short-term (disk snapshots) + long-term (memory/memory.json)
+  memory.py    long-term memory/memory.json: baseline, selectors, selector fixes, known bugs, flaky
   main.py      CLI entry point (--mock, --release ...)
   diff_releases.py  no-LLM helper: snapshot good + buggy and print the diff
   demo_tools.py     no-LLM helper: write one sample test, run it on good (pass) + buggy (fail)
@@ -62,7 +62,8 @@ tests/generated/        tests written by the agent (test_*.py only, gitignored)
 tests/generated/conftest.py  human-written: patient + signed_in fixtures, localhost-only route guard, 5s timeouts
 tests/unit/             triage unit tests with a fake runner (no browser): python -m pytest tests/unit
 pytest.ini              pythonpath=., default base_url = good release
-memory/memory.json      long-term memory
+memory/memory.json      long-term memory (gitignored runtime state; memory/baselines/ holds the
+                        saved baseline snapshot; CI persists memory/ as a cache/artifact)
 runs/<timestamp>/       trace.jsonl, snapshots/, test-results/, tests/ (copy), report.md   (gitignored)
 evals/expected_bugs.json
 evals/run_eval.py
@@ -125,7 +126,6 @@ files carry no "BUG" comments, so they look like a real release.
 - Each run clears tests/generated/test_*.py first and copies the written tests into the run folder.
 - Exit codes: 0 done, 1 llm_error / missing key, 2 portal not reachable, 3 budget or policy stop.
 - Prices: gpt-4.1-mini $0.40 in / $1.60 out per 1M tokens (verify); mock is $0 with ~4 chars/token.
-- Not built yet: memory.
 
 ## Triage + healing (agent/triage.py)
 
@@ -144,6 +144,26 @@ After every model `run_tests` on the release, the harness triages each failing t
   heal 2 `#lab-results-frame` -> valid -> real_bug BUG-3. Result: 4 real bugs, 1 healed (2/3).
 - report.md: summary counts, bugs (type, journey, test, failure, diff line, repro command), healed,
   flaky, needs-review, full snapshot diff, steps/tool calls/harness runs/tokens/cost/duration.
+
+## Memory (agent/memory.py)
+
+- Short-term: snapshots and pytest logs on disk in runs/<id>/; the model only sees summaries.
+- Long-term `memory/memory.json`, written by the harness at run end, only from harness-verified
+  facts: `baselines` (copy of the baseline snapshot in memory/baselines/ + `passing_tests`: test id ->
+  code hash that passed on that baseline), `working_selectors`, `selector_fixes` (bad -> good,
+  learned by diffing a healed test's failing versions vs its final version: exactly one locator
+  removed + one added), `reported_bugs` (fingerprint = diff line, or journey + error shape with
+  digits normalized), `flaky_tests`, `run_count`, `runs` (last 20).
+- On a later run: the saved baseline is pre-loaded as label "baseline" and any snapshot_page of the
+  baseline URL is served from memory (no browser); triage skips the baseline run for a test whose
+  code hash already passed on that baseline; write_test swaps known-bad locators (result has
+  `memory_fixes`; triage still verifies on the baseline); real bugs matching a fingerprint are
+  KNOWN (report shows first run + times seen) vs NEW. The model also gets a short briefing in the
+  first user message.
+- Flags: `--no-memory` (evals: reproducible), `--reset-memory`, `--refresh-baseline`. Known
+  limitation: baseline is keyed by URL only; a real pipeline should key it by the good build id.
+- Mock qe is reactive: skips the baseline snapshot when briefed, heals only while broken_test.
+  Run 1: 9 steps, ~100s, 4 new bugs, 1 healed. Run 2: 5 steps, ~54s, 4 known bugs, 0 heals.
 
 ## Tools (exposed to the model)
 
@@ -191,7 +211,7 @@ In mock mode, write one test with a wrong selector first so healing is visible.
 3. Portal (buggy, 4 planted bugs). ✅
 4. Tools: snapshot_page, compare_snapshots, write_test, run_tests + demo scripts. ✅
 4b. Harness + mock LLM + main.py. ✅
-5. Memory.
+5. Memory. ✅
 6. Healing / triage loop + report.md. ✅
 7. Evals.
 8. CI (GitHub Actions + Azure Pipelines).

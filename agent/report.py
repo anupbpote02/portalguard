@@ -55,9 +55,11 @@ def write_report(path: Path, summary: dict, triage: Triage, baseline_url: str, r
         "",
         "## Summary",
         "",
-        "| Real bugs | Healed tests | Flaky (not reported) | Unconfirmed | Broken tests left |",
-        "|---|---|---|---|---|",
-        f"| {len(bugs)} | {len(healed)} | {len(flaky)} | {len(unconfirmed)} | {len(gave_up)} |",
+        "| Real bugs | New | Known | Healed tests | Flaky (not reported) | Unconfirmed | Broken tests left |",
+        "|---|---|---|---|---|---|---|",
+        f"| {len(bugs)} | {sum(1 for g in bugs if not g['records'][0].get('known'))} | "
+        f"{sum(1 for g in bugs if g['records'][0].get('known'))} | {len(healed)} | {len(flaky)} | "
+        f"{len(unconfirmed)} | {len(gave_up)} |",
         "",
         "| LLM steps | Tool calls | Harness test runs | Tokens | Cost | Duration |",
         "|---|---|---|---|---|---|",
@@ -72,16 +74,21 @@ def write_report(path: Path, summary: dict, triage: Triage, baseline_url: str, r
         lines += ["No real bugs found.", ""]
     for number, group in enumerate(bugs, 1):
         first = group["records"][0]
+        known = first.get("known")
+        status = (f"KNOWN (first reported in run #{known['first_reported_run']}, seen {known['times_seen'] + 1}x)"
+                  if known else "NEW")
         lines += [
-            f"### {number}. {_bug_title(group)}",
+            f"### {number}. [{'KNOWN' if known else 'NEW'}] {_bug_title(group)}",
             "",
+            f"- **Status:** {status}",
             f"- **Type:** {first['category']}" + (f"  |  **Journey:** {first['journey']}" if first["journey"] else ""),
             "- **Evidence:**",
         ]
         for record in group["records"]:
             lines += [
-                f"  - Test `{record['test']}`: passed on baseline, failed on release "
-                f"{len(record['release_runs'])}/{len(record['release_runs'])} runs"
+                f"  - Test `{record['test']}`: passed on baseline"
+                + (" (same test, remembered from an earlier run)" if record.get("baseline_from_memory") else "")
+                + f", failed on release {len(record['release_runs'])}/{len(record['release_runs'])} runs"
                 + (" (after healing)" if record.get("healed") else ""),
                 f"  - Failure: `{_one_line(record['release_error'])}`",
             ]
@@ -116,6 +123,21 @@ def write_report(path: Path, summary: dict, triage: Triage, baseline_url: str, r
         lines += [f"- `{r['test']}` ({r['verdict']}): {r['why']}. Error: `{_one_line(r.get('release_error'))}`"
                   for r in unconfirmed + gave_up]
         lines.append("")
+
+    memory = summary.get("memory") or {}
+    lines += ["## Memory", ""]
+    if memory.get("enabled"):
+        lines += [
+            f"- Run #{memory['run_number']} with long-term memory (`memory/memory.json`).",
+            "- Baseline snapshot: " + (f"reused from memory (saved {memory['baseline_reused']})"
+                                       if memory["baseline_reused"] else "taken this run and saved to memory"),
+            f"- Baseline test runs skipped (test already passed on this baseline): {memory['baseline_runs_skipped']}",
+            "- Selector fixes applied from memory: "
+            + ("; ".join(f"`{fix}`" for fix in memory["selector_fixes"]) or "none"),
+            "",
+        ]
+    else:
+        lines += ["Memory was off for this run (`--no-memory`).", ""]
 
     lines += ["## Snapshot diff (baseline -> release)", ""]
     changes = (triage.diff or {}).get("changes", {})

@@ -5,6 +5,9 @@
     python -m agent.main --mock --scenario runaway       # looping model: stopped by MAX_STEPS
     python -m agent.main                                 # live: gpt-4.1-mini, key from .env
 
+Memory flags: --no-memory (ignore and don't update memory/memory.json), --reset-memory (start empty),
+--refresh-baseline (re-snapshot the baseline even if memory has one).
+
 The portal must be running:  python -m http.server 8000 --directory portal
 """
 
@@ -17,6 +20,7 @@ from dotenv import load_dotenv
 
 from agent.harness import PRICES_PER_1M, Harness
 from agent.llm import MOCK_SCENARIOS, MockLLM, OpenAILLM
+from agent.memory import MEMORY_FILE, Memory
 
 EXIT_CODES = {"done": 0, "llm_error": 1}  # any budget / policy stop -> 3
 
@@ -27,6 +31,9 @@ def main() -> int:
     parser.add_argument("--release", default="http://localhost:8000/buggy/", help="release under test")
     parser.add_argument("--mock", action="store_true", help="use the scripted fake LLM ($0, no key)")
     parser.add_argument("--scenario", choices=sorted(MOCK_SCENARIOS), default="qe", help="mock script to replay")
+    parser.add_argument("--no-memory", action="store_true", help="don't read or write long-term memory")
+    parser.add_argument("--reset-memory", action="store_true", help="delete memory/memory.json before the run")
+    parser.add_argument("--refresh-baseline", action="store_true", help="snapshot the baseline even if remembered")
     args = parser.parse_args()
 
     try:
@@ -45,7 +52,11 @@ def main() -> int:
             print(e)
             return 1
 
-    summary = Harness(llm, args.baseline, args.release).run()
+    if args.reset_memory and MEMORY_FILE.exists():
+        MEMORY_FILE.unlink()
+    memory = Memory(enabled=not args.no_memory)
+    summary = Harness(llm, args.baseline, args.release, memory=memory,
+                      refresh_baseline=args.refresh_baseline).run()
 
     print(f"\nPortalGuard run ({llm.model}{', scenario ' + args.scenario if args.mock else ''})")
     print(f"  stop reason : {summary['stop_reason']}")
@@ -57,6 +68,15 @@ def main() -> int:
         input_price, _ = PRICES_PER_1M["gpt-4.1-mini"]  # rough: mock tokens are mostly prompt
         print(f"  (same tokens on gpt-4.1-mini: ~${summary['total_tokens'] * input_price / 1e6:.4f})", end="")
     print(f"\n  duration    : {summary['duration_s']}s")
+    m = summary["memory"]
+    if m["enabled"]:
+        print(f"  memory      : run #{m['run_number']}, baseline "
+              f"{'reused from ' + m['baseline_reused'] if m['baseline_reused'] else 'snapshotted'}, "
+              f"{m['baseline_runs_skipped']} baseline test runs skipped, {len(m['selector_fixes'])} selector fixes")
+    else:
+        print("  memory      : off")
+    print(f"  bugs        : {summary['new_bugs']} new, {summary['known_bugs']} known  |  healed: {len(summary['healed'])}")
+    print(f"  report      : {summary['report']}")
     print(f"  trace       : {summary['trace']}")
     if summary["final_message"]:
         print(f"  final       : {summary['final_message']}")

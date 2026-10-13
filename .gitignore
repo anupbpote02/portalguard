@@ -16,3 +16,8 @@ playwright-report/
 
 # Agent-written tests are run output (conftest.py stays tracked)
 tests/generated/test_*.py
+
+# Long-term agent memory is runtime state (CI persists it as a cache/artifact)
+memory/memory.json
+memory/*.tmp
+memory/baselines/

@@ -153,27 +153,44 @@ def _summarize_triage(messages: list[dict]) -> str:
     return "Mock QE run complete. Triage: " + ", ".join(f"{n} {v}" for v, n in counts.items()) + "."
 
 
-def qe_scenario(baseline_url: str, release_url: str) -> list:
+def qe_scenario(baseline_url: str, release_url: str):
     """Snapshot, diff, write journey tests (one with a wrong iframe selector), run, heal, summarize.
 
-    The lab results test first uses "#labs-frame" (wrong). The harness sees it fail on the baseline too
-    and asks for a fix. Heal attempt 1 guesses "#lab_results_frame" (still wrong); attempt 2 uses the
-    frame id from baseline_has ("lab-results-frame") and the test becomes valid evidence of BUG-3.
+    The lab results test is always written with "#labs-frame" (wrong). On a first run the harness sees it
+    fail on the baseline too and asks for a fix: heal 1 guesses "#lab_results_frame" (still wrong), heal 2
+    uses the frame id from baseline_has ("lab-results-frame"). On later runs long-term memory swaps the
+    bad selector before the test is written, so no healing is needed.
+    The script reacts like a model would: it skips the baseline snapshot if memory says it's saved,
+    and only heals while triage says broken_test.
     """
     lab_test = JOURNEY_TESTS["test_lab_results.py"]
     first_tests = {**JOURNEY_TESTS, "test_lab_results.py": _with_frame(lab_test, "#labs-frame")}
-    return [
-        [("snapshot_page", {"url": baseline_url, "label": "baseline"}),
-         ("snapshot_page", {"url": release_url, "label": "release"})],
-        [("compare_snapshots", {"baseline": "baseline", "new": "release"})],
-        [("write_test", {"filename": name, "code": code}) for name, code in first_tests.items()],
-        [("run_tests", {})],
-        [("write_test", {"filename": "test_lab_results.py", "code": _with_frame(lab_test, "#lab_results_frame")})],
-        [("run_tests", {"filename": "test_lab_results.py"})],
-        [("write_test", {"filename": "test_lab_results.py", "code": lab_test})],
-        [("run_tests", {"filename": "test_lab_results.py"})],
-        _summarize_triage,
-    ]
+    heals = [_with_frame(lab_test, "#lab_results_frame"), lab_test]
+
+    def snapshots(messages):
+        release = ("snapshot_page", {"url": release_url, "label": "release"})
+        if 'already saved as label "baseline"' in messages[1]["content"]:
+            return [release]
+        return [("snapshot_page", {"url": baseline_url, "label": "baseline"}), release]
+
+    def heal_or_finish(messages):
+        last_call = next(m for m in reversed(messages) if m["role"] == "assistant")["tool_calls"][0]["function"]
+        if last_call["name"] == "write_test":
+            return [("run_tests", {"filename": "test_lab_results.py"})]
+        last_triage = json.loads(next(m for m in reversed(messages) if m["role"] == "tool")["content"]).get("triage", {})
+        broken = any(t.startswith("test_lab_results.py") and v["verdict"] == "broken_test" for t, v in last_triage.items())
+        heals_done = sum(1 for m in messages if m["role"] == "assistant" and m.get("tool_calls")
+                         and m["tool_calls"][0]["function"]["name"] == "write_test") - 1
+        if broken and heals_done < len(heals):
+            return [("write_test", {"filename": "test_lab_results.py", "code": heals[heals_done]})]
+        return _summarize_triage(messages)
+
+    yield snapshots
+    yield [("compare_snapshots", {"baseline": "baseline", "new": "release"})]
+    yield [("write_test", {"filename": name, "code": code}) for name, code in first_tests.items()]
+    yield [("run_tests", {})]
+    while True:
+        yield heal_or_finish
 
 
 def guardrails_scenario(baseline_url: str, release_url: str) -> list:

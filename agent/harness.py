@@ -4,7 +4,8 @@ The model only chooses which tool to call with which arguments. The harness:
   - enforces budgets (steps, tokens, cost) before every LLM call,
   - validates every tool call (known tool, JSON args, schema, localhost-only URLs),
   - binds the arguments the model must not control (output folders, release under test),
-  - writes every event to runs/<timestamp>/trace.jsonl.
+  - writes every event to runs/<timestamp>/trace.jsonl,
+  - reads long-term memory at the start of a run and writes what the run proved at the end.
 """
 
 import json
@@ -15,6 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from agent import tools
+from agent.memory import Memory
 from agent.report import write_report
 from agent.triage import Triage
 
@@ -121,7 +123,8 @@ def validate_args(schema: dict, args) -> str | None:
 
 class Harness:
     def __init__(self, llm, baseline_url: str, release_url: str, run_dir: Path | None = None,
-                 max_steps: int = MAX_STEPS, max_tokens: int = MAX_TOKENS, max_cost_usd: float = MAX_COST_USD):
+                 max_steps: int = MAX_STEPS, max_tokens: int = MAX_TOKENS, max_cost_usd: float = MAX_COST_USD,
+                 memory: Memory | None = None, refresh_baseline: bool = False):
         tools.check_url(baseline_url)
         tools.check_url(release_url)
         self.llm = llm
@@ -137,6 +140,16 @@ class Harness:
         self.blocked_calls = 0
         self.tool_calls = 0
         self.triage = Triage(self._harness_run_tests, baseline_url, release_url)
+
+        self.memory = memory if memory is not None else Memory(enabled=False)
+        self.refresh_baseline = refresh_baseline
+        self.cached_baseline = None                    # memory entry, if the baseline is reused
+        self.fresh_baseline = None                     # (snapshot file, summary) taken this run
+        self.code_versions: dict[str, list[str]] = {}  # filename -> every version written this run
+        self.memory_fixes: list[str] = []
+
+    def _is_baseline(self, url: str) -> bool:
+        return tools.release_base(url) == tools.release_base(self.baseline_url)
 
     def _harness_run_tests(self, base_url: str, filename: str, test_name: str) -> dict:
         """Test runs the harness does itself during triage (reruns, baseline runs)."""
@@ -188,10 +201,18 @@ class Harness:
                 self.blocked_calls += 1
                 return "blocked", {"error": f"BLOCKED by harness: {e}"}
 
+        fixes = []
         if call.name == "write_test":
             refusal = self.triage.before_write(args["filename"])
             if refusal:
                 return "refused", {"error": refusal}
+            # Locators that failed on the baseline in an earlier run are swapped for the ones that fixed them.
+            # Triage still checks the result against the baseline, so a bad memory can't sneak through.
+            args["code"], fixes = self.memory.apply_selector_fixes(args["code"])
+            self.memory_fixes += [f"{args['filename']}: {fix}" for fix in fixes]
+
+        if call.name == "snapshot_page" and self.cached_baseline and self._is_baseline(args["url"]):
+            return "ok", self._baseline_from_memory(args["label"])
 
         # Arguments the model never controls: where files go, and which release tests run against.
         snapshots = self.run_dir / "snapshots"
@@ -214,11 +235,28 @@ class Harness:
         # The harness decides what results mean.
         if call.name == "snapshot_page":
             self.triage.record_snapshot(result)
+            if self._is_baseline(args["url"]) and not result["js_errors"]:
+                self.fresh_baseline = (snapshots / f"{args['label']}.json", result)
+        elif call.name == "write_test":
+            self.code_versions.setdefault(args["filename"], []).append(args["code"])
+            if fixes:
+                result["memory_fixes"] = fixes
         elif call.name == "compare_snapshots":
             self.triage.record_diff(result)
         elif call.name == "run_tests":
             result["triage"] = self.triage.process(result)
         return "ok", result
+
+    def _baseline_from_memory(self, label: str) -> dict:
+        """Serve the saved baseline snapshot instead of opening a browser."""
+        target = self.run_dir / "snapshots" / f"{label}.json"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(tools.REPO_ROOT / self.cached_baseline["snapshot_path"], target)
+        summary = {**self.cached_baseline["summary"], "label": label,
+                   "saved": str(target.relative_to(tools.REPO_ROOT)),
+                   "from_memory": f"baseline saved {self.cached_baseline['saved_at']}"}
+        self.triage.record_snapshot(summary)
+        return summary
 
     # ------------------------------------------------------------ loop
 
@@ -238,10 +276,23 @@ class Harness:
                              "max_cost_usd": self.max_cost_usd, "max_blocked_calls": MAX_BLOCKED_CALLS},
                     cleared_old_tests=removed)
 
+        # Long-term memory: reuse the saved baseline (pre-loaded as label "baseline") unless asked to refresh.
+        if not self.refresh_baseline:
+            self.cached_baseline = self.memory.cached_baseline(self.baseline_url)
+        if self.cached_baseline:
+            self._baseline_from_memory("baseline")
+            self.triage.known_baseline_passes = self.memory.baseline_passes(self.baseline_url)
+        briefing = self.memory.briefing(self.baseline_url, baseline_preloaded=bool(self.cached_baseline))
+        trace.write("memory_loaded", enabled=self.memory.enabled, previous_runs=self.memory.run_count,
+                    baseline_reused=bool(self.cached_baseline),
+                    known_baseline_passes=len(self.triage.known_baseline_passes),
+                    selector_fixes=len(self.memory.data["selector_fixes"]),
+                    reported_bugs=len(self.memory.data["reported_bugs"]), briefing=briefing)
+
+        task = f"Baseline (last good release): {self.baseline_url}\nRelease under test: {self.release_url}"
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": f"Baseline (last good release): {self.baseline_url}\n"
-                                        f"Release under test: {self.release_url}"},
+            {"role": "user", "content": task + (f"\n\n{briefing}" if briefing else "")},
         ]
         stop_reason, final_message = None, None
 
@@ -311,8 +362,29 @@ class Harness:
         summary["triage"] = {verdict: [r["test"] for r in self.triage.records(verdict)]
                              for verdict in ("real_bug", "flaky", "unconfirmed", "broken_test", "gave_up")}
         summary["healed"] = [r["test"] for r in self.triage.healed()]
+
+        # Known vs new is decided against memory as it was BEFORE this run.
+        for record in self.triage.records("real_bug"):
+            record["known"] = self.memory.known_bug(record)
+        summary["new_bugs"] = sum(1 for r in self.triage.records("real_bug") if not r["known"])
+        summary["known_bugs"] = sum(1 for r in self.triage.records("real_bug") if r["known"])
+        summary["memory"] = {
+            "enabled": self.memory.enabled,
+            "run_number": self.memory.run_count + 1,
+            "baseline_reused": self.cached_baseline["saved_at"] if self.cached_baseline else None,
+            "baseline_runs_skipped": sum(1 for r in self.triage.tests.values() if r.get("baseline_from_memory")),
+            "selector_fixes": self.memory_fixes,
+        }
         summary["report"] = str(write_report(self.run_dir / "report.md", summary, self.triage,
                                              self.baseline_url, self.release_url, self.llm.model))
+
+        if self.fresh_baseline:
+            self.memory.save_baseline(self.baseline_url, *self.fresh_baseline)
+        learned = self.memory.learn(self.run_dir.name, self.release_url, self.baseline_url, self.triage,
+                                    self.code_versions, summary)
+        self.memory.save()
+        trace.write("memory_saved", enabled=self.memory.enabled, path=str(self.memory.path),
+                    baseline_saved=bool(self.fresh_baseline), **learned)
         trace.write("run_end", **summary)
         trace.close()
         return summary

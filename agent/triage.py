@@ -47,6 +47,8 @@ class Triage:
         self.diff: dict | None = None          # last compare_snapshots result
         self.harness_runs = 0                  # test runs the harness did on its own (reruns, baseline)
         self.events: list[dict] = []           # for the trace
+        # From long-term memory: test id -> code hash of tests that passed on this same baseline before.
+        self.known_baseline_passes: dict[str, str] = {}
 
     # ------------------------------------------------------------ hooks called by the harness
 
@@ -112,7 +114,12 @@ class Triage:
 
     def _decide(self, record: dict, filename: str, name: str, was_broken: bool) -> None:
         # Baseline first: a test that can't pass on the last good release is wrong, whatever else happens.
-        baseline = self._run_one(self.baseline_url, filename, name)
+        # Memory can answer this without a run: same test code already passed on this same baseline.
+        if self.known_baseline_passes.get(record["test"]) == record["code_hash"]:
+            baseline = {"outcome": "passed"}
+            record["baseline_from_memory"] = True
+        else:
+            baseline = self._run_one(self.baseline_url, filename, name)
         record["baseline_outcome"] = baseline["outcome"]
         if baseline["outcome"] != "passed":
             record["baseline_error"] = baseline.get("message")
