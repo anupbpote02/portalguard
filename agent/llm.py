@@ -135,26 +135,44 @@ def test_download_lab_results_pdf(signed_in: Page, patient: dict):
 }
 
 
-def _summarize_last_run(messages: list[dict]) -> str:
-    """Mock's final message, built from the last run_tests result it was shown."""
-    for message in reversed(messages):
-        if message["role"] == "tool" and '"passed"' in message["content"]:
-            result = json.loads(message["content"])
-            failed = [r["test"] for r in result["results"] if r["outcome"] != "passed"]
-            return (f"Mock QE run complete: {result['passed']} passed, {len(failed)} failed. "
-                    f"Failing: {', '.join(failed) or 'none'}.")
-    return "Mock QE run complete (no test results seen)."
+def _with_frame(code: str, frame_selector: str) -> str:
+    """The lab results test with a different iframe selector (to script broken versions)."""
+    return code.replace('"#lab-results-frame"', f'"{frame_selector}"')
+
+
+def _summarize_triage(messages: list[dict]) -> str:
+    """Mock's final message, built from every triage verdict it was shown (latest wins)."""
+    verdicts = {}
+    for message in messages:
+        if message["role"] == "tool" and '"triage"' in message["content"]:
+            for test, info in json.loads(message["content"])["triage"].items():
+                verdicts[test] = info["verdict"]
+    if not verdicts:
+        return "Mock QE run complete: all tests passed."
+    counts = {v: sum(x == v for x in verdicts.values()) for v in sorted(set(verdicts.values()))}
+    return "Mock QE run complete. Triage: " + ", ".join(f"{n} {v}" for v, n in counts.items()) + "."
 
 
 def qe_scenario(baseline_url: str, release_url: str) -> list:
-    """Happy path: snapshot both releases, diff, write journey tests, run them, summarize."""
+    """Snapshot, diff, write journey tests (one with a wrong iframe selector), run, heal, summarize.
+
+    The lab results test first uses "#labs-frame" (wrong). The harness sees it fail on the baseline too
+    and asks for a fix. Heal attempt 1 guesses "#lab_results_frame" (still wrong); attempt 2 uses the
+    frame id from baseline_has ("lab-results-frame") and the test becomes valid evidence of BUG-3.
+    """
+    lab_test = JOURNEY_TESTS["test_lab_results.py"]
+    first_tests = {**JOURNEY_TESTS, "test_lab_results.py": _with_frame(lab_test, "#labs-frame")}
     return [
         [("snapshot_page", {"url": baseline_url, "label": "baseline"}),
          ("snapshot_page", {"url": release_url, "label": "release"})],
         [("compare_snapshots", {"baseline": "baseline", "new": "release"})],
-        [("write_test", {"filename": name, "code": code}) for name, code in JOURNEY_TESTS.items()],
+        [("write_test", {"filename": name, "code": code}) for name, code in first_tests.items()],
         [("run_tests", {})],
-        _summarize_last_run,
+        [("write_test", {"filename": "test_lab_results.py", "code": _with_frame(lab_test, "#lab_results_frame")})],
+        [("run_tests", {"filename": "test_lab_results.py"})],
+        [("write_test", {"filename": "test_lab_results.py", "code": lab_test})],
+        [("run_tests", {"filename": "test_lab_results.py"})],
+        _summarize_triage,
     ]
 
 

@@ -51,13 +51,16 @@ portal/
 agent/
   harness.py   loop, budgets, allowlist, arg validation, trace log, tool schemas, system prompt
   llm.py       OpenAILLM (gpt-4.1-mini) + MockLLM and mock scenarios (qe, guardrails, runaway)
+  triage.py    deterministic verdicts per failing test (baseline = oracle), heal limits
+  report.py    runs/<id>/report.md from harness state, never from model text
   tools.py     snapshot_page, compare_snapshots, write_test, run_tests
   memory.py    short-term (disk snapshots) + long-term (memory/memory.json)
   main.py      CLI entry point (--mock, --release ...)
   diff_releases.py  no-LLM helper: snapshot good + buggy and print the diff
   demo_tools.py     no-LLM helper: write one sample test, run it on good (pass) + buggy (fail)
 tests/generated/        tests written by the agent (test_*.py only, gitignored)
-tests/generated/conftest.py  human-written: patient fixture, localhost-only route guard, 5s timeouts
+tests/generated/conftest.py  human-written: patient + signed_in fixtures, localhost-only route guard, 5s timeouts
+tests/unit/             triage unit tests with a fake runner (no browser): python -m pytest tests/unit
 pytest.ini              pythonpath=., default base_url = good release
 memory/memory.json      long-term memory
 runs/<timestamp>/       trace.jsonl, snapshots/, test-results/, tests/ (copy), report.md   (gitignored)
@@ -122,7 +125,25 @@ files carry no "BUG" comments, so they look like a real release.
 - Each run clears tests/generated/test_*.py first and copies the written tests into the run folder.
 - Exit codes: 0 done, 1 llm_error / missing key, 2 portal not reachable, 3 budget or policy stop.
 - Prices: gpt-4.1-mini $0.40 in / $1.60 out per 1M tokens (verify); mock is $0 with ~4 chars/token.
-- Not built yet: healing/triage loop, report.md, memory.
+- Not built yet: memory.
+
+## Triage + healing (agent/triage.py)
+
+After every model `run_tests` on the release, the harness triages each failing test itself:
+1. Run it on the **baseline**. Fails there too -> `broken_test` (the test is wrong). The model gets
+   baseline_error + baseline_has (frame ids, headings, buttons) and heals with write_test. Max 3
+   attempts per file, then `gave_up` (Needs human review) and further writes are refused.
+2. Passes on baseline -> rerun on release (FLAKY_RERUNS=1). Passes now -> `flaky`, not reported.
+3. Fails 2/2 on release -> `real_bug` if a diff line mentions a name the locator waited for
+   (accessibility) or the file maps to a journey (functional); else `unconfirmed`.
+- write_test on a file proving a real_bug is refused (the agent can't heal a bug away).
+- Same code + decided verdict -> no extra runs. Passing tests cost no extra runs.
+- Why baseline first: a wrong selector like `#labs-frame` waits for name="Lab results", which also
+  matches the BUG-3 diff line. Name matching alone would call a broken test a bug.
+- Mock qe: lab results test starts with `#labs-frame`, heal 1 `#lab_results_frame` (still wrong),
+  heal 2 `#lab-results-frame` -> valid -> real_bug BUG-3. Result: 4 real bugs, 1 healed (2/3).
+- report.md: summary counts, bugs (type, journey, test, failure, diff line, repro command), healed,
+  flaky, needs-review, full snapshot diff, steps/tool calls/harness runs/tokens/cost/duration.
 
 ## Tools (exposed to the model)
 
@@ -169,9 +190,9 @@ In mock mode, write one test with a wrong selector first so healing is visible.
 2. Portal (good). ✅
 3. Portal (buggy, 4 planted bugs). ✅
 4. Tools: snapshot_page, compare_snapshots, write_test, run_tests + demo scripts. ✅
-4b. Harness + mock LLM + main.py (no healing/triage yet). ✅
+4b. Harness + mock LLM + main.py. ✅
 5. Memory.
-6. Healing / triage loop + report.md.
+6. Healing / triage loop + report.md. ✅
 7. Evals.
 8. CI (GitHub Actions + Azure Pipelines).
 9. README.

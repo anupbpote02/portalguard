@@ -321,10 +321,12 @@ def write_test(filename: str, code: str) -> dict:
     }
 
 
-def run_tests(base_url: str, filename: str | None = None, results_dir: Path = DEFAULT_RESULTS_DIR) -> dict:
+def run_tests(base_url: str, filename: str | None = None, results_dir: Path = DEFAULT_RESULTS_DIR,
+              test_name: str | None = None) -> dict:
     """Run generated tests against one release with pytest; return pass/fail per test.
 
     base_url is set by the harness (the release under test), not by the model.
+    test_name (harness only, needs filename) runs a single test function, for triage reruns.
     Pass/fail comes from Playwright assertions via pytest's JUnit XML, never from the LLM.
     """
     check_url(base_url)
@@ -334,7 +336,11 @@ def run_tests(base_url: str, filename: str | None = None, results_dir: Path = DE
             raise ValueError("filename must look like test_<lowercase_words>.py")
         if not (GENERATED_TESTS_DIR / filename).exists():
             raise ValueError(f"no such test file: {filename}")
-    target = GENERATED_TESTS_DIR / filename if filename else GENERATED_TESTS_DIR
+    if test_name is not None and (filename is None or not re.fullmatch(r"test_\w{1,80}", test_name)):
+        raise ValueError("test_name needs a filename and must look like test_<words>")
+    target = str(GENERATED_TESTS_DIR / filename) if filename else str(GENERATED_TESTS_DIR)
+    if test_name:
+        target += f"::{test_name}"
 
     results_dir = Path(results_dir)
     results_dir.mkdir(parents=True, exist_ok=True)
@@ -342,7 +348,7 @@ def run_tests(base_url: str, filename: str | None = None, results_dir: Path = DE
     junit_path = results_dir / f"junit-{stamp}.xml"
     log_path = results_dir / f"pytest-{stamp}.log"
 
-    command = [sys.executable, "-m", "pytest", str(target), "--base-url", base_url,
+    command = [sys.executable, "-m", "pytest", target, "--base-url", base_url,
                "-q", "-p", "no:cacheprovider", f"--junitxml={junit_path}"]
     try:
         proc = subprocess.run(command, cwd=REPO_ROOT, capture_output=True, text=True,

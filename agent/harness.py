@@ -15,6 +15,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from agent import tools
+from agent.report import write_report
+from agent.triage import Triage
 
 MAX_STEPS = 25            # LLM calls per run
 MAX_TOKENS = 150_000      # prompt + completion, summed over all calls
@@ -33,7 +35,12 @@ Do this, in order:
 2. compare_snapshots("baseline", "release").
 3. write_test one file per key journey: sign in, see upcoming appointments, view lab results
    (inside iframe #lab-results-frame), download the lab results PDF. Add a test for each diff.
-4. run_tests (it runs against the release). Then reply with a short summary and stop.
+4. run_tests (it runs against the release). The harness triages every failure and adds a "triage"
+   verdict per test:
+   - broken_test: the test also fails on the baseline, so the test is wrong. Fix it with write_test
+     (same filename) using baseline_error and baseline_has, then run_tests on that file. Max 3 tries.
+   - real_bug / flaky / unconfirmed: decided by the harness. Do not edit real_bug tests.
+5. When no broken_test is left (or you are out of tries), reply with a short summary and stop.
 
 Test rules: Python, pytest + Playwright sync API, only import from playwright.sync_api / pytest / re / json.
 Fixtures: page, base_url (ends with "/"), patient (dict: email, password, name, mrn, appointments,
@@ -129,6 +136,11 @@ class Harness:
         self.cost_usd = 0.0
         self.blocked_calls = 0
         self.tool_calls = 0
+        self.triage = Triage(self._harness_run_tests, baseline_url, release_url)
+
+    def _harness_run_tests(self, base_url: str, filename: str, test_name: str) -> dict:
+        """Test runs the harness does itself during triage (reruns, baseline runs)."""
+        return tools.run_tests(base_url, filename, results_dir=self.run_dir / "test-results", test_name=test_name)
 
     # ------------------------------------------------------------ budgets
 
@@ -176,6 +188,11 @@ class Harness:
                 self.blocked_calls += 1
                 return "blocked", {"error": f"BLOCKED by harness: {e}"}
 
+        if call.name == "write_test":
+            refusal = self.triage.before_write(args["filename"])
+            if refusal:
+                return "refused", {"error": refusal}
+
         # Arguments the model never controls: where files go, and which release tests run against.
         snapshots = self.run_dir / "snapshots"
         bound = {
@@ -191,7 +208,17 @@ class Harness:
             return "invalid", {"error": str(e)}
         except Exception as e:  # a tool bug must not crash the run
             return "error", {"error": f"{type(e).__name__}: {e}"}
-        return ("error" if result.get("error") else "ok"), result
+        if result.get("error"):
+            return "error", result
+
+        # The harness decides what results mean.
+        if call.name == "snapshot_page":
+            self.triage.record_snapshot(result)
+        elif call.name == "compare_snapshots":
+            self.triage.record_diff(result)
+        elif call.name == "run_tests":
+            result["triage"] = self.triage.process(result)
+        return "ok", result
 
     # ------------------------------------------------------------ loop
 
@@ -258,6 +285,9 @@ class Harness:
                 trace.write("tool_call", step=self.steps, tool=call.name, call_id=call.id,
                             arguments=call.arguments, status=status, result=result,
                             duration_ms=round((time.monotonic() - tool_started) * 1000))
+                for event in self.triage.events:
+                    trace.write("triage", step=self.steps, **event)
+                self.triage.events.clear()
 
         # Keep a copy of the tests this run wrote next to its trace.
         written = sorted(tools.GENERATED_TESTS_DIR.glob("test_*.py"))
@@ -272,11 +302,17 @@ class Harness:
             "steps": self.steps,
             "tool_calls": self.tool_calls,
             "blocked_calls": self.blocked_calls,
+            "harness_test_runs": self.triage.harness_runs,
             **self._totals(),
             "duration_s": round(time.monotonic() - started, 1),
             "run_dir": str(self.run_dir),
             "trace": str(self.run_dir / "trace.jsonl"),
         }
+        summary["triage"] = {verdict: [r["test"] for r in self.triage.records(verdict)]
+                             for verdict in ("real_bug", "flaky", "unconfirmed", "broken_test", "gave_up")}
+        summary["healed"] = [r["test"] for r in self.triage.healed()]
+        summary["report"] = str(write_report(self.run_dir / "report.md", summary, self.triage,
+                                             self.baseline_url, self.release_url, self.llm.model))
         trace.write("run_end", **summary)
         trace.close()
         return summary
